@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // readTemperatures reads all available temperatures from IPMI.
@@ -49,7 +50,54 @@ func (c *Controller) readTemperatures() (snapshot, error) {
 			snap.gpu = &v
 		}
 	}
+	snap.fanRPMMin, snap.fanRPMMax = c.cachedFanRPMRange()
 	return snap, nil
+}
+
+// cachedFanRPMRange refreshes fan RPM telemetry at the summary interval so it
+// can confirm actuator behavior without doubling the control-loop IPMI traffic.
+func (c *Controller) cachedFanRPMRange() (*int, *int) {
+	if c.lastFanRPMRead.IsZero() || time.Since(c.lastFanRPMRead) >= c.cfg.LogInterval {
+		c.lastFanRPMRead = time.Now()
+		if out, err := c.runIPMI("sdr", "type", "fan"); err == nil {
+			if min, max, ok := parseFanRPMRange(out); ok {
+				c.fanRPMMin = &min
+				c.fanRPMMax = &max
+			}
+		}
+	}
+	return intPointerCopy(c.fanRPMMin), intPointerCopy(c.fanRPMMax)
+}
+
+func parseFanRPMRange(output string) (int, int, bool) {
+	min, max := 0, 0
+	found := false
+	for _, line := range strings.Split(output, "\n") {
+		fields := strings.Split(line, "|")
+		if len(fields) < 2 || !strings.Contains(strings.ToUpper(fields[1]), "RPM") {
+			continue
+		}
+		value, ok := parseTempField(fields[1])
+		if !ok || value < 0 {
+			continue
+		}
+		if !found || value < min {
+			min = value
+		}
+		if !found || value > max {
+			max = value
+		}
+		found = true
+	}
+	return min, max, found
+}
+
+func intPointerCopy(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 // parseTempField extracts a temperature value from an IPMI field.

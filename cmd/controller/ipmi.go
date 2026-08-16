@@ -49,43 +49,24 @@ func (c *Controller) measureIPMILatency(samples int) (time.Duration, error) {
 	return avgLatency, nil
 }
 
-// detectBMCRefreshRate rapid-polls the BMC for sensor changes to detect refresh rate.
-// Returns the interval at which the BMC updates sensor readings.
-func (c *Controller) detectBMCRefreshRate(timeout time.Duration) (time.Duration, error) {
-	var firstReading *int
-	defaultRefreshRate := 5 * time.Second
-	pollStart := time.Now()
+const defaultCheckInterval = 5 * time.Second
 
-	for time.Since(pollStart) < timeout {
-		snap, err := c.readTemperatures()
-		if err != nil {
-			return defaultRefreshRate, fmt.Errorf("failed to read temperatures during BMC detection: %w", err)
-		}
-
-		rawMax, _, hasReading := maxTemp(snap.cpuTemps)
-		if !hasReading {
-			time.Sleep(100 * time.Millisecond)
-			continue
-		}
-
-		if firstReading == nil {
-			firstReading = &rawMax
-		} else if rawMax != *firstReading {
-			// Value changed, so we detected a refresh
-			refreshRate := time.Since(pollStart)
-			return refreshRate, nil
-		}
-
-		time.Sleep(100 * time.Millisecond)
+// automaticCheckInterval uses a predictable baseline while ensuring one IPMI
+// request has time to finish before the next control cycle begins.
+func automaticCheckInterval(latency time.Duration) time.Duration {
+	interval := defaultCheckInterval
+	if latencyFloor := latency * 3; latencyFloor > interval {
+		interval = latencyFloor
 	}
-
-	// Timeout reached; return default
-	return defaultRefreshRate, nil
+	if interval > 60*time.Second {
+		return 60 * time.Second
+	}
+	return interval
 }
 
-// setupAutoIntervals measures IPMI latency and BMC refresh rate, then auto-calculates all intervals.
+// setupAutoIntervals measures IPMI latency, then configures a predictable cadence.
 func (c *Controller) setupAutoIntervals() error {
-	fmt.Println("Auto-calculating intervals...")
+	fmt.Println("Configuring control intervals...")
 
 	// Only measure if CHECK_INTERVAL wasn't explicitly set
 	if c.cfg.CheckInterval == 0 {
@@ -97,35 +78,8 @@ func (c *Controller) setupAutoIntervals() error {
 		c.cfg.IPMILatency = latency
 		fmt.Printf("  IPMI latency (avg)              : %v\n", latency)
 
-		// Detect BMC sensor refresh rate
-		fmt.Println("  Detecting BMC sensor refresh rate (up to 15 seconds)...")
-		bmcRefreshRate, err := c.detectBMCRefreshRate(15 * time.Second)
-		if err != nil {
-			fmt.Printf("  Warning: BMC detection failed: %v (using default 5s)\n", err)
-		}
-		fmt.Printf("  BMC sensor refresh rate         : %v\n", bmcRefreshRate)
-
-		// Calculate CHECK_INTERVAL = max(IPMI_LATENCY × 2.5 + safety margin, BMC_REFRESH_RATE)
-		safetyMargin := 500 * time.Millisecond
-		if !c.cfg.NetworkMode {
-			safetyMargin = 100 * time.Millisecond
-		}
-
-		calculatedInterval := latency*5/2 + safetyMargin // 2.5x latency + safety
-		if calculatedInterval < bmcRefreshRate {
-			calculatedInterval = bmcRefreshRate
-		}
-
-		// Enforce min/max bounds
-		if calculatedInterval < 1*time.Second {
-			calculatedInterval = 1 * time.Second
-		}
-		if calculatedInterval > 60*time.Second {
-			calculatedInterval = 60 * time.Second
-		}
-
-		c.cfg.CheckInterval = calculatedInterval
-		fmt.Printf("  Calculated CHECK_INTERVAL       : %v\n", c.cfg.CheckInterval)
+		c.cfg.CheckInterval = automaticCheckInterval(latency)
+		fmt.Printf("  CHECK_INTERVAL (auto)           : %v (5s baseline, latency-clamped)\n", c.cfg.CheckInterval)
 	} else {
 		fmt.Printf("  CHECK_INTERVAL (user-set)       : %v\n", c.cfg.CheckInterval)
 	}

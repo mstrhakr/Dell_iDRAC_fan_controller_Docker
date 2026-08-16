@@ -212,6 +212,8 @@ func (c *Controller) cycle() error {
 		profile:   profile,
 		comment:   comment,
 		source:    controlLabel,
+		fanRPMMin: snap.fanRPMMin,
+		fanRPMMax: snap.fanRPMMax,
 	}
 	c.recordSample(sample)
 	return nil

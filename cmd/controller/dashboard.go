@@ -18,6 +18,8 @@ func (c *Controller) appendDashboardSample(sample cycleSample) {
 		Source:        sample.source,
 		Profile:       sample.profile,
 		Comment:       sample.comment,
+		FanRPMMin:     sample.fanRPMMin,
+		FanRPMMax:     sample.fanRPMMax,
 	}
 
 	c.dashboard.current = point
@@ -78,7 +80,15 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     .label { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.06em; }
     .value { font-size:28px; font-weight:700; margin-top:6px; }
     .chart { margin-top:14px; background:var(--panel); border:1px solid var(--border); border-radius:8px; padding:14px; box-shadow:0 8px 22px rgba(0,0,0,.08); }
+    .chart-header { display:flex; align-items:flex-start; justify-content:space-between; gap:14px; margin-bottom:8px; }
     .title { font-size:14px; color:var(--muted); margin-bottom:6px; }
+    .chart-summary { color:var(--muted); font-size:11px; }
+    .legend { display:flex; flex-wrap:wrap; justify-content:flex-end; gap:10px; color:var(--muted); font-size:11px; }
+    .legend span { display:inline-flex; align-items:center; gap:5px; }
+    .swatch { width:9px; height:9px; border-radius:2px; background:var(--line1); }
+    .swatch.ema { background:var(--line2); }
+    .swatch.target { background:var(--target); }
+    .swatch.rpm { background:var(--line3); }
     svg { width:100%; height:220px; display:block; }
     .footer { margin-top:10px; color:var(--muted); font-size:13px; }
     .decision { margin-top:14px; padding:14px; display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center; }
@@ -86,7 +96,7 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     .decision-note { margin:9px 0 0; color:var(--muted); font-size:12px; line-height:1.5; }
     .facts { display:flex; gap:16px; color:var(--muted); font-size:12px; text-align:right; }
     .facts b { display:block; color:var(--ink); font-size:15px; margin-top:4px; }
-    @media (max-width:600px) { .header { align-items:flex-start; } .decision { grid-template-columns:1fr; } .facts { text-align:left; } }
+    @media (max-width:600px) { .header { align-items:flex-start; } .decision { grid-template-columns:1fr; } .facts { text-align:left; } .chart-header { display:block; } .legend { justify-content:flex-start; margin-top:10px; } }
   </style>
 </head>
 <body>
@@ -97,15 +107,20 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     <div class="card"><div class="label">Current EMA Temp</div><div id="ema" class="value">-</div></div>
     <div class="card"><div class="label">Current Fan Command</div><div id="fan" class="value">-</div></div>
     <div class="card"><div class="label">Control Source</div><div id="source" class="value">-</div></div>
+    <div class="card"><div class="label">Measured Fan RPM</div><div id="rpm" class="value">-</div><div id="rpmDetail" class="status">Refreshed with the summary window</div></div>
   </div>
   <div class="card decision"><div><div class="label">Current decision</div><strong id="profile">Waiting for first sample</strong><p class="decision-note" id="note">The controller will publish its latest fan decision here.</p></div><div class="facts"><span>Target<b id="target">-</b></span><span>Threshold<b id="threshold">-</b></span><span>Samples<b id="samples">0</b></span></div></div>
   <div class="chart">
-    <div class="title">Temperature (Raw and EMA)</div>
+    <div class="chart-header"><div><div class="title">Temperature history</div><div id="tempSummary" class="chart-summary">Waiting for samples</div></div><div class="legend"><span><i class="swatch"></i>Raw IPMI</span><span><i class="swatch ema"></i>EMA</span><span><i class="swatch target"></i>Target</span></div></div>
     <svg id="tempChart" viewBox="0 0 1000 220"></svg>
   </div>
   <div class="chart">
-    <div class="title">Fan Command (%)</div>
+    <div class="chart-header"><div><div class="title">Fan command history</div><div id="fanSummary" class="chart-summary">Waiting for samples</div></div><div class="legend"><span><i class="swatch rpm"></i>Requested duty cycle</span></div></div>
     <svg id="fanChart" viewBox="0 0 1000 220"></svg>
+  </div>
+  <div class="chart">
+    <div class="chart-header"><div><div class="title">Measured fan RPM history</div><div id="rpmSummary" class="chart-summary">RPM is refreshed at the log interval</div></div><div class="legend"><span><i class="swatch"></i>Lowest fan</span><span><i class="swatch rpm"></i>Highest fan</span></div></div>
+    <svg id="rpmChart" viewBox="0 0 1000 220"></svg>
   </div>
   <div id="meta" class="footer"></div>
 </div>
@@ -134,10 +149,27 @@ function drawSeries(svg, series, color, yMin, yMax) {
   svg.appendChild(line);
 }
 
-function renderChart(svgId, sets, colors, minV, maxV) {
+function renderChart(svgId, sets, colors, minV, maxV, guides) {
   const svg = document.getElementById(svgId);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
+  const height = 220, pad = 16, span = Math.max(1, maxV - minV);
+  (guides || []).forEach((guide) => {
+    if (!Number.isFinite(guide.value)) return;
+    const y = height - pad - ((guide.value - minV) / span) * (height - 2*pad);
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", "16"); line.setAttribute("x2", "984"); line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("stroke", guide.color); line.setAttribute("stroke-width", "1.5"); line.setAttribute("stroke-dasharray", "5 5");
+    svg.appendChild(line);
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+    label.setAttribute("x", "980"); label.setAttribute("y", y - 4); label.setAttribute("fill", guide.color); label.setAttribute("font-size", "11"); label.setAttribute("text-anchor", "end"); label.textContent = guide.label;
+    svg.appendChild(label);
+  });
   sets.forEach((s, i) => drawSeries(svg, s, colors[i], minV, maxV));
+}
+
+function rangeLabel(values, suffix) {
+  if (!values.length) return '-';
+  return Math.min(...values) + '–' + Math.max(...values) + suffix;
 }
 
 async function refresh() {
@@ -159,11 +191,23 @@ async function refresh() {
   const raw = h.map(p => p.raw).filter(v => Number.isFinite(v));
   const ema = h.map(p => p.ema).filter(v => Number.isFinite(v));
   const fan = h.map(p => p.fan).filter(v => Number.isFinite(v) && v >= 0);
+  const rpmMin = h.map(p => p.fan_rpm_min).filter(v => Number.isFinite(v));
+  const rpmMax = h.map(p => p.fan_rpm_max).filter(v => Number.isFinite(v));
+  const currentRPMMin = now.fan_rpm_min, currentRPMMax = now.fan_rpm_max;
+  document.getElementById('rpm').textContent = Number.isFinite(currentRPMMin) && Number.isFinite(currentRPMMax) ? (currentRPMMin + '–' + currentRPMMax + ' RPM') : '-';
+  document.getElementById('rpmDetail').textContent = Number.isFinite(currentRPMMin) ? 'Lowest–highest reported fan RPM' : 'No fan RPM sensor reported yet';
 
   const tempMin = Math.min(...raw, ...ema, 20);
   const tempMax = Math.max(...raw, ...ema, 100);
-  renderChart('tempChart', [raw, ema], ['#006d77', '#e76f51'], tempMin - 2, tempMax + 2);
+  const lower = tempMin - 2, upper = tempMax + 2;
+  renderChart('tempChart', [raw, ema], ['#006d77', '#e76f51'], lower, upper, [{ value:d.target_temperature, label:'target ' + d.target_temperature + 'C', color:'#bc7c14' }, { value:d.threshold_temperature, label:'threshold ' + d.threshold_temperature + 'C', color:'#dc6045' }]);
   renderChart('fanChart', [fan], ['#2a9d8f'], 0, 100);
+  const rpmFloor = Math.max(0, Math.min(...rpmMin, ...rpmMax, 0) - 200);
+  const rpmCeiling = Math.max(...rpmMin, ...rpmMax, 1000) + 200;
+  renderChart('rpmChart', [rpmMin, rpmMax], ['#087e8b', '#249e91'], rpmFloor, rpmCeiling);
+  document.getElementById('tempSummary').textContent = 'Raw ' + rangeLabel(raw, 'C') + ' | EMA ' + rangeLabel(ema, 'C');
+  document.getElementById('fanSummary').textContent = 'Requested range ' + rangeLabel(fan, '%');
+  document.getElementById('rpmSummary').textContent = rpmMin.length ? ('Measured range ' + Math.min(...rpmMin) + '–' + Math.max(...rpmMax) + ' RPM') : 'RPM is refreshed at the log interval';
 
   document.getElementById('meta').textContent =
     'samples=' + h.length +

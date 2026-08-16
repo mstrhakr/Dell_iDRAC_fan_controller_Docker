@@ -24,6 +24,19 @@ func TestParseInterval(t *testing.T) {
 	}
 }
 
+func TestAutomaticCheckInterval(t *testing.T) {
+	cases := map[time.Duration]time.Duration{
+		100 * time.Millisecond: defaultCheckInterval,
+		2 * time.Second:        6 * time.Second,
+		30 * time.Second:       60 * time.Second,
+	}
+	for latency, want := range cases {
+		if got := automaticCheckInterval(latency); got != want {
+			t.Fatalf("automaticCheckInterval(%v) = %v, want %v", latency, got, want)
+		}
+	}
+}
+
 func TestParseFanSpeed(t *testing.T) {
 	v, err := parseFanSpeed("0x32")
 	if err != nil {
@@ -193,5 +206,13 @@ func TestParseTempField(t *testing.T) {
 	v, ok := parseTempField("45 degrees C")
 	if !ok || v != 45 {
 		t.Fatalf("parseTempField: ok=%v v=%d", ok, v)
+	}
+}
+
+func TestParseFanRPMRange(t *testing.T) {
+	output := "Fan 1 RPM | 3840 RPM | ok\nFan 2 RPM | 4200 RPM | ok\nInlet Temp | 22 degrees C | ok"
+	min, max, ok := parseFanRPMRange(output)
+	if !ok || min != 3840 || max != 4200 {
+		t.Fatalf("parseFanRPMRange() = (%d, %d, %t), want (3840, 4200, true)", min, max, ok)
 	}
 }

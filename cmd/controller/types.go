@@ -87,15 +87,20 @@ type Controller struct {
 	statsMu             sync.RWMutex
 	window              logWindow
 	lastSummaryLog      time.Time
+	lastFanRPMRead      time.Time
+	fanRPMMin           *int
+	fanRPMMax           *int
 	dashboard           dashboardState
 }
 
 // Snapshot contains a single temperature reading cycle.
 type snapshot struct {
-	cpuTemps map[string]int
-	inlet    *int
-	exhaust  *int
-	gpu      *int
+	cpuTemps  map[string]int
+	inlet     *int
+	exhaust   *int
+	gpu       *int
+	fanRPMMin *int
+	fanRPMMax *int
 }
 
 // cycleSample contains one control loop sample used for logging and dashboard updates.
@@ -108,6 +113,8 @@ type cycleSample struct {
 	profile   string
 	comment   string
 	source    string
+	fanRPMMin *int
+	fanRPMMax *int
 }
 
 // logWindow stores aggregate metrics between summary log flushes.
@@ -137,6 +144,8 @@ type dashboardSample struct {
 	Source        string  `json:"source"`
 	Profile       string  `json:"profile"`
 	Comment       string  `json:"comment"`
+	FanRPMMin     *int    `json:"fan_rpm_min,omitempty"`
+	FanRPMMax     *int    `json:"fan_rpm_max,omitempty"`
 }
 
 // dashboardState stores current and recent controller samples.
