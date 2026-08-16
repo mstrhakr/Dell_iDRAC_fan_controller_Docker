@@ -74,20 +74,22 @@ func parseFanRPMRange(output string) (int, int, bool) {
 	found := false
 	for _, line := range strings.Split(output, "\n") {
 		fields := strings.Split(line, "|")
-		if len(fields) < 2 || !strings.Contains(strings.ToUpper(fields[1]), "RPM") {
-			continue
+		for _, field := range fields {
+			if !strings.Contains(strings.ToUpper(field), "RPM") {
+				continue
+			}
+			value, ok := parseTempField(field)
+			if !ok || value < 0 {
+				continue
+			}
+			if !found || value < min {
+				min = value
+			}
+			if !found || value > max {
+				max = value
+			}
+			found = true
 		}
-		value, ok := parseTempField(fields[1])
-		if !ok || value < 0 {
-			continue
-		}
-		if !found || value < min {
-			min = value
-		}
-		if !found || value > max {
-			max = value
-		}
-		found = true
 	}
 	return min, max, found
 }

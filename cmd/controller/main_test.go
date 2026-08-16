@@ -210,9 +210,9 @@ func TestParseTempField(t *testing.T) {
 }
 
 func TestParseFanRPMRange(t *testing.T) {
-	output := "Fan 1 RPM | 3840 RPM | ok\nFan 2 RPM | 4200 RPM | ok\nInlet Temp | 22 degrees C | ok"
+	output := "Fan1 | 30h | ok | 7.1 | 3240 RPM\nFan2 | 31h | ok | 7.1 | 3360 RPM\nFan3 | 32h | ok | 7.1 | 3240 RPM\nFan4 | 33h | ok | 7.1 | 3360 RPM\nFan Redundancy | 75h | ok | 7.1 | Fully Redundant"
 	min, max, ok := parseFanRPMRange(output)
-	if !ok || min != 3840 || max != 4200 {
-		t.Fatalf("parseFanRPMRange() = (%d, %d, %t), want (3840, 4200, true)", min, max, ok)
+	if !ok || min != 3240 || max != 3360 {
+		t.Fatalf("parseFanRPMRange() = (%d, %d, %t), want (3240, 3360, true)", min, max, ok)
 	}
 }
