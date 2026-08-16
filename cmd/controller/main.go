@@ -154,6 +154,10 @@ func (c *Controller) cycle() error {
 	case c.cfg.AutoMode && controlLabel != "":
 		prevFan := c.safeRound(c.pid.current)
 		speed, roc := c.pidStep(smoothed, float64(controlThreshold))
+		if trend.baselineFloor > speed && speed < trendBoostFanCeiling {
+			speed = trend.baselineFloor
+			c.pid.current = float64(speed)
+		}
 		if trend.boost > 0 && speed >= prevFan && speed < trendBoostFanCeiling {
 			speed += trend.boost
 			if speed > trendBoostFanCeiling {
@@ -169,6 +173,9 @@ func (c *Controller) cycle() error {
 		}
 		profile = fmt.Sprintf("PID Auto Mode (%d%%)", speed)
 		switch {
+		case trend.baselineFloor > prevFan:
+			comment = fmt.Sprintf("Above learned idle: %.1f°C over %.1f°C baseline, fan floor %d%%",
+				smoothed-trend.learnedBaseline, trend.learnedBaseline, speed)
 		case trend.boost > 0:
 			comment = fmt.Sprintf("Sustained warming: 30s average %.1f°C above 90s %.1f°C, fan↑%d%%",
 				trend.average30, trend.average90, speed)
@@ -216,20 +223,24 @@ func (c *Controller) cycle() error {
 	}
 
 	sample := cycleSample{
-		timestamp:  sampleTimestamp,
-		inlet:      snap.inlet,
-		raw:        controlRaw,
-		ema:        smoothed,
-		fan:        appliedFan,
-		profile:    profile,
-		comment:    comment,
-		source:     controlLabel,
-		trend30:    trend.average30,
-		trend60:    trend.average60,
-		trend90:    trend.average90,
-		trendBoost: trend.boost,
-		fanRPMMin:  snap.fanRPMMin,
-		fanRPMMax:  snap.fanRPMMax,
+		timestamp:       sampleTimestamp,
+		inlet:           snap.inlet,
+		raw:             controlRaw,
+		ema:             smoothed,
+		fan:             appliedFan,
+		profile:         profile,
+		comment:         comment,
+		source:          controlLabel,
+		trend30:         trend.average30,
+		trend60:         trend.average60,
+		trend90:         trend.average90,
+		trendBoost:      trend.boost,
+		startupBaseline: trend.startupBaseline,
+		learnedBaseline: trend.learnedBaseline,
+		baselineReady:   trend.baselineReady,
+		baselineFloor:   trend.baselineFloor,
+		fanRPMMin:       snap.fanRPMMin,
+		fanRPMMax:       snap.fanRPMMax,
 	}
 	c.recordSample(sample)
 	return nil

@@ -10,20 +10,24 @@ import (
 
 func (c *Controller) appendDashboardSample(sample cycleSample) {
 	point := dashboardSample{
-		TimestampUnix: sample.timestamp.Unix(),
-		Raw:           sample.raw,
-		EMA:           sample.ema,
-		Fan:           sample.fan,
-		Inlet:         sample.inlet,
-		Source:        sample.source,
-		Profile:       sample.profile,
-		Comment:       sample.comment,
-		FanRPMMin:     sample.fanRPMMin,
-		FanRPMMax:     sample.fanRPMMax,
-		Trend30:       sample.trend30,
-		Trend60:       sample.trend60,
-		Trend90:       sample.trend90,
-		TrendBoost:    sample.trendBoost,
+		TimestampUnix:   sample.timestamp.Unix(),
+		Raw:             sample.raw,
+		EMA:             sample.ema,
+		Fan:             sample.fan,
+		Inlet:           sample.inlet,
+		Source:          sample.source,
+		Profile:         sample.profile,
+		Comment:         sample.comment,
+		FanRPMMin:       sample.fanRPMMin,
+		FanRPMMax:       sample.fanRPMMax,
+		Trend30:         sample.trend30,
+		Trend60:         sample.trend60,
+		Trend90:         sample.trend90,
+		TrendBoost:      sample.trendBoost,
+		StartupBaseline: sample.startupBaseline,
+		LearnedBaseline: sample.learnedBaseline,
+		BaselineReady:   sample.baselineReady,
+		BaselineFloor:   sample.baselineFloor,
 	}
 
 	c.dashboard.current = point
@@ -263,6 +267,8 @@ async function refresh() {
     ' margin=' + d.margin + 'C' +
     ' rate_boost=' + d.rate_boost +
     ' trend_30/60/90=' + now.trend_30.toFixed(1) + '/' + now.trend_60.toFixed(1) + '/' + now.trend_90.toFixed(1) + 'C' +
+    ' startup_baseline=' + now.startup_baseline.toFixed(1) + 'C' +
+    (now.baseline_ready ? ' learned_baseline=' + now.learned_baseline.toFixed(1) + 'C floor=' + now.baseline_floor + '%' : ' learned_baseline=waiting') +
     (now.trend_boost ? ' trend_boost=+' + now.trend_boost + '%' : '');
   document.getElementById('status').textContent = now.ts ? ('Live telemetry | latest sample ' + new Date(now.ts * 1000).toLocaleTimeString()) : 'Waiting for telemetry';
 }

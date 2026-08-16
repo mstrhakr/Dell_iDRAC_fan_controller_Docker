@@ -264,6 +264,46 @@ func TestTrendBoostWaitsForWarmupAndUsesCooldown(t *testing.T) {
 	}
 }
 
+func TestBaselineLearningRequiresStableLowFanOperation(t *testing.T) {
+	c := newTestController()
+	start := time.Unix(0, 0)
+	target := 65.0
+
+	for elapsed := time.Duration(0); elapsed <= baselineLearningDuration; elapsed += 5 * time.Second {
+		trend := c.recordTrend(start.Add(elapsed), 50, target, 80)
+		if trend.baselineReady {
+			t.Fatalf("baseline learned with high fan at %v", elapsed)
+		}
+	}
+
+	for elapsed := time.Duration(0); elapsed <= baselineLearningDuration+trendWarmupDuration; elapsed += 5 * time.Second {
+		c.recordTrend(start.Add(baselineLearningDuration+10*time.Second+elapsed), 50, target, 30)
+	}
+	if !c.trend.baselineReady {
+		t.Fatal("baseline was not learned after sustained stable operation")
+	}
+	if c.trend.learnedBaseline < 49 || c.trend.learnedBaseline > 51 {
+		t.Fatalf("learned baseline = %.1f, want approximately 50", c.trend.learnedBaseline)
+	}
+}
+
+func TestBaselineFloorIsCappedAndBelowTargetOnly(t *testing.T) {
+	c := newTestController()
+	c.trend.baselineReady = true
+	c.trend.learnedBaseline = 40
+	start := time.Unix(0, 0)
+	for elapsed := time.Duration(0); elapsed <= trendWarmupDuration; elapsed += 5 * time.Second {
+		c.recordTrend(start.Add(elapsed), 58, 65, 30)
+	}
+	if c.trend.baselineFloor <= c.cfg.AutoModeFanSpeedMin || c.trend.baselineFloor > baselineMaximumFloor {
+		t.Fatalf("baseline floor = %d, want (%d, %d]", c.trend.baselineFloor, c.cfg.AutoModeFanSpeedMin, baselineMaximumFloor)
+	}
+	c.recordTrend(start.Add(trendWarmupDuration+5*time.Second), 65, 65, 30)
+	if c.trend.baselineFloor != 0 {
+		t.Fatalf("baseline floor at target = %d, want 0", c.trend.baselineFloor)
+	}
+}
+
 func TestEMASmoothing(t *testing.T) {
 	var e emaState
 	first := e.update(0.3, 50.0)

@@ -82,12 +82,17 @@ type trendSample struct {
 }
 
 type trendState struct {
-	samples   []trendSample
-	average30 float64
-	average60 float64
-	average90 float64
-	boost     int
-	lastBoost time.Time
+	samples             []trendSample
+	average30           float64
+	average60           float64
+	average90           float64
+	boost               int
+	lastBoost           time.Time
+	startupBaseline     float64
+	learnedBaseline     float64
+	baselineReady       bool
+	baselineStableSince time.Time
+	baselineFloor       int
 }
 
 // Controller is the main fan control orchestrator.
@@ -121,20 +126,24 @@ type snapshot struct {
 
 // cycleSample contains one control loop sample used for logging and dashboard updates.
 type cycleSample struct {
-	timestamp  time.Time
-	inlet      *int
-	raw        int
-	ema        float64
-	fan        int
-	profile    string
-	comment    string
-	source     string
-	trend30    float64
-	trend60    float64
-	trend90    float64
-	trendBoost int
-	fanRPMMin  *int
-	fanRPMMax  *int
+	timestamp       time.Time
+	inlet           *int
+	raw             int
+	ema             float64
+	fan             int
+	profile         string
+	comment         string
+	source          string
+	trend30         float64
+	trend60         float64
+	trend90         float64
+	trendBoost      int
+	startupBaseline float64
+	learnedBaseline float64
+	baselineReady   bool
+	baselineFloor   int
+	fanRPMMin       *int
+	fanRPMMax       *int
 }
 
 // logWindow stores aggregate metrics between summary log flushes.
@@ -156,20 +165,24 @@ type logWindow struct {
 
 // dashboardSample is the lightweight time-series point exposed by the dashboard API.
 type dashboardSample struct {
-	TimestampUnix int64   `json:"ts"`
-	Raw           int     `json:"raw"`
-	EMA           float64 `json:"ema"`
-	Fan           int     `json:"fan"`
-	Inlet         *int    `json:"inlet,omitempty"`
-	Source        string  `json:"source"`
-	Profile       string  `json:"profile"`
-	Comment       string  `json:"comment"`
-	Trend30       float64 `json:"trend_30"`
-	Trend60       float64 `json:"trend_60"`
-	Trend90       float64 `json:"trend_90"`
-	TrendBoost    int     `json:"trend_boost"`
-	FanRPMMin     *int    `json:"fan_rpm_min,omitempty"`
-	FanRPMMax     *int    `json:"fan_rpm_max,omitempty"`
+	TimestampUnix   int64   `json:"ts"`
+	Raw             int     `json:"raw"`
+	EMA             float64 `json:"ema"`
+	Fan             int     `json:"fan"`
+	Inlet           *int    `json:"inlet,omitempty"`
+	Source          string  `json:"source"`
+	Profile         string  `json:"profile"`
+	Comment         string  `json:"comment"`
+	Trend30         float64 `json:"trend_30"`
+	Trend60         float64 `json:"trend_60"`
+	Trend90         float64 `json:"trend_90"`
+	TrendBoost      int     `json:"trend_boost"`
+	StartupBaseline float64 `json:"startup_baseline"`
+	LearnedBaseline float64 `json:"learned_baseline"`
+	BaselineReady   bool    `json:"baseline_ready"`
+	BaselineFloor   int     `json:"baseline_floor"`
+	FanRPMMin       *int    `json:"fan_rpm_min,omitempty"`
+	FanRPMMax       *int    `json:"fan_rpm_max,omitempty"`
 }
 
 // dashboardState stores current and recent controller samples.
