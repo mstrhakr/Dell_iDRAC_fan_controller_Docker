@@ -27,9 +27,14 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=builder /out/dell_idrac_fan_controller /app/dell_idrac_fan_controller
+COPY supervisor.sh /app/supervisor.sh
+COPY functions.sh /app/functions.sh
+COPY constants.sh /app/constants.sh
 COPY LICENSE /app/LICENSE
 COPY LICENSE-COMMERCIAL.md /app/LICENSE-COMMERCIAL.md
 COPY NOTICE /app/NOTICE
+
+RUN chmod 0755 /app/supervisor.sh
 
 # you should override these default values when running. See README.md
 ENV IDRAC_HOST=local
@@ -50,4 +55,5 @@ ENV AUTO_MODE_TEMPERATURE_MARGIN=3
 ENV GPU_TEMPERATURE_SOURCE=disabled
 ENV GPU_TEMPERATURE_THRESHOLD=80
 
-ENTRYPOINT ["/app/dell_idrac_fan_controller"]
+ENTRYPOINT ["./supervisor.sh"]
+CMD ["/app/dell_idrac_fan_controller"]
