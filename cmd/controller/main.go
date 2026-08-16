@@ -149,7 +149,6 @@ func (c *Controller) cycle() error {
 		comment = "No fan control (monitoring only mode)"
 
 	case c.cfg.AutoMode && controlLabel != "":
-		prevSmoothed := c.prevSmoothed
 		prevFan := c.safeRound(c.pid.current)
 		speed, roc := c.pidStep(smoothed, float64(controlThreshold))
 		appliedFan = speed
@@ -167,7 +166,7 @@ func (c *Controller) cycle() error {
 		case smoothed > float64(controlThreshold):
 			comment = fmt.Sprintf("Overtemp: %s EMA=%.1f°C > %d°C, fan→%d%%",
 				controlLabel, smoothed, controlThreshold, speed)
-		case smoothed > target && float64(speed) > prevSmoothed:
+		case smoothed > target && speed > prevFan:
 			comment = fmt.Sprintf("Stabilizing: %s EMA=%.1f°C, fan↑%d%%",
 				controlLabel, smoothed, speed)
 		case speed < prevFan:
@@ -177,8 +176,6 @@ func (c *Controller) cycle() error {
 			comment = fmt.Sprintf("Optimal: %s EMA=%.1f°C target %.0f°C, %d%%",
 				controlLabel, smoothed, target, speed)
 		}
-		c.prevSmoothed = smoothed
-
 	case hasCPU && rawMax <= c.cfg.CPUTemperatureThreshold && !(snap.gpu != nil && *snap.gpu > c.cfg.GPUTemperatureThreshold):
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(c.cfg.FanSpeed); err != nil {

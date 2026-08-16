@@ -81,6 +81,7 @@ type Controller struct {
 	pid                 pidState
 	ema                 emaState
 	prevSmoothed        float64
+	hasPrevSmoothed     bool
 	ipmiFailures        int
 	ipmiFailuresAllowed int
 	statsMu             sync.RWMutex

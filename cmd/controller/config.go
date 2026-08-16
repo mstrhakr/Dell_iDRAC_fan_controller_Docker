@@ -24,17 +24,17 @@ func loadConfig() (Config, error) {
 		DisableThirdPartyPCIeCooling:     false,
 		KeepThirdPartyCoolingStateOnExit: false,
 		MonitoringOnlyMode:               false,
-		AutoMode:                         false,
-		PIDKp:                            2.0,
-		PIDKi:                            0.5,
-		PIDKd:                            1.0,
-		PIDIntegralLimit:                 50.0,
+		AutoMode:                         true,
+		PIDKp:                            1.5,
+		PIDKi:                            0.1,
+		PIDKd:                            0.5,
+		PIDIntegralLimit:                 20.0,
 		AutoModeFanSpeedMin:              10,
 		AutoModeFanSpeedMax:              100,
-		AutoModeTemperatureMargin:        5,
+		AutoModeTemperatureMargin:        3,
 		EMAAlpha:                         0.3,
 		RateOfChangeTriggerPerCycle:      2.0,
-		RateOfChangeBoostGain:            2.0,
+		RateOfChangeBoostGain:            1.0,
 		GPUTemperatureSource:             "disabled",
 		GPUTemperatureThreshold:          80,
 		VerboseCycleLogging:              false,
@@ -50,7 +50,7 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("MONITORING_ONLY_MODE: %w", err)
 	}
-	cfg.AutoMode, err = parseBoolStrict(envOrDefault("AUTO_MODE", "false"))
+	cfg.AutoMode, err = parseBoolStrict(envOrDefault("AUTO_MODE", "true"))
 	if err != nil {
 		return cfg, fmt.Errorf("AUTO_MODE: %w", err)
 	}
@@ -93,15 +93,15 @@ func loadConfig() (Config, error) {
 	}
 
 	// PID gains
-	cfg.PIDKp, err = parseFloat(envOrDefault("PID_GAIN_PROPORTIONAL", "2.0"))
+	cfg.PIDKp, err = parseFloat(envOrDefault("PID_GAIN_PROPORTIONAL", "1.5"))
 	if err != nil {
 		return cfg, fmt.Errorf("PID_GAIN_PROPORTIONAL: %w", err)
 	}
-	cfg.PIDKi, err = parseFloat(envOrDefault("PID_GAIN_INTEGRAL", "0.5"))
+	cfg.PIDKi, err = parseFloat(envOrDefault("PID_GAIN_INTEGRAL", "0.1"))
 	if err != nil {
 		return cfg, fmt.Errorf("PID_GAIN_INTEGRAL: %w", err)
 	}
-	cfg.PIDKd, err = parseFloat(envOrDefault("PID_GAIN_DERIVATIVE", "1.0"))
+	cfg.PIDKd, err = parseFloat(envOrDefault("PID_GAIN_DERIVATIVE", "0.5"))
 	if err != nil {
 		return cfg, fmt.Errorf("PID_GAIN_DERIVATIVE: %w", err)
 	}
@@ -125,7 +125,7 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("RATE_OF_CHANGE_TRIGGER: %w", err)
 	}
-	cfg.RateOfChangeBoostGain, err = parseFloat(envOrDefault("RATE_OF_CHANGE_BOOST", "2.0"))
+	cfg.RateOfChangeBoostGain, err = parseFloat(envOrDefault("RATE_OF_CHANGE_BOOST", "1.0"))
 	if err != nil {
 		return cfg, fmt.Errorf("RATE_OF_CHANGE_BOOST: %w", err)
 	}

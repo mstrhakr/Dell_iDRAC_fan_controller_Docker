@@ -113,6 +113,7 @@ func TestPIDRateOfChangeBoost(t *testing.T) {
 	c.ema.seeded = true
 	// Large rise in EMA this cycle: prevSmoothed was 37, now 40 => roc=3 > trigger 2
 	c.prevSmoothed = 37.0
+	c.hasPrevSmoothed = true
 
 	speedWithROC, roc := c.pidStep(41.0, 50.0)
 	if roc < c.cfg.RateOfChangeTriggerPerCycle {
@@ -129,6 +130,49 @@ func TestPIDRateOfChangeBoost(t *testing.T) {
 
 	if speedWithROC <= speedWithoutROC {
 		t.Fatalf("roc boost: expected %d > %d", speedWithROC, speedWithoutROC)
+	}
+}
+
+func TestPIDFirstSampleDoesNotTriggerRateOfChangeBoost(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 10
+
+	speed, roc := c.pidStep(47.0, 50.0)
+	if roc != 0 {
+		t.Fatalf("first sample rate of change = %v, want 0", roc)
+	}
+	if speed >= 100 {
+		t.Fatalf("first sample fan speed = %d, want below 100", speed)
+	}
+}
+
+func TestPIDLimitsFanSpeedChangesPerCycle(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 10
+	c.prevSmoothed = 45
+	c.hasPrevSmoothed = true
+
+	speed, _ := c.pidStep(60.0, 50.0)
+	if speed > 20 {
+		t.Fatalf("fan speed changed from 10%% to %d%% in one cycle, want at most 20%%", speed)
+	}
+}
+
+func TestPIDClearsIntegralAtTarget(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 60
+	c.pid.integral = c.cfg.PIDIntegralLimit
+	c.pid.prevError = 2
+	c.prevSmoothed = 48
+	c.hasPrevSmoothed = true
+
+	target := 50.0 - float64(c.cfg.AutoModeTemperatureMargin)
+	speed, _ := c.pidStep(target, 50.0)
+	if c.pid.integral != 0 {
+		t.Fatalf("integral at target = %v, want 0", c.pid.integral)
+	}
+	if speed >= 60 {
+		t.Fatalf("fan speed at target = %d%%, want it to start decreasing", speed)
 	}
 }
 
@@ -151,4 +195,3 @@ func TestParseTempField(t *testing.T) {
 		t.Fatalf("parseTempField: ok=%v v=%d", ok, v)
 	}
 }
-
