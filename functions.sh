@@ -5,7 +5,167 @@
 
 # shellcheck disable=SC2034  # Every function/constant here is consumed by the scripts that source this file, not by this file itself
 
+# PID Control State Variables
+# These track the controller state across monitoring cycles
+PID_PREVIOUS_ERROR=0
+PID_INTEGRAL_SUM=0
+PID_CURRENT_FAN_SPEED=0
+PID_MODE=false
+
 # Define global functions
+
+# Initialize PID control mode
+# Usage : initialize_PID_mode
+# Sets up the PID controller with initial values
+function initialize_PID_mode() {
+  if ! "$AUTO_MODE"; then
+    return
+  fi
+
+  PID_MODE=true
+  PID_PREVIOUS_ERROR=0
+  PID_INTEGRAL_SUM=0
+  PID_CURRENT_FAN_SPEED=$((AUTO_MODE_FAN_SPEED_MIN + (AUTO_MODE_FAN_SPEED_MAX - AUTO_MODE_FAN_SPEED_MIN) / 2))
+  
+  printf "PID Auto Mode initialized with fan speed range %d%% - %d%%, temperature margin: %d°C\n" \
+    "$AUTO_MODE_FAN_SPEED_MIN" "$AUTO_MODE_FAN_SPEED_MAX" "$AUTO_MODE_TEMPERATURE_MARGIN"
+}
+
+# Calculate PID control output based on CPU temperature error
+# Usage : calculate_PID_fan_speed $CURRENT_TEMP $TARGET_THRESHOLD $Kp $Ki $Kd
+# Returns : new fan speed as a percentage (0-100)
+function calculate_PID_fan_speed() {
+  local -r CURRENT_TEMP=$1
+  local -r TARGET_THRESHOLD=$2
+  local -r KP=$3
+  local -r KI=$4
+  local -r KD=$5
+
+  # Calculate error (negative means we're below threshold, which is good)
+  # error = target - current, so positive error means we're too hot
+  local -i ERROR=$((TARGET_THRESHOLD - CURRENT_TEMP))
+
+  # Proportional term: proportional to current error (multiply by 10 for precision)
+  # P = Kp * error
+  local -i PROPORTIONAL_TERM=$((ERROR * ${KP%.*}))
+  
+  # Add fractional part of Kp if it exists
+  if [[ "$KP" == *"."* ]]; then
+    local FRAC=${KP#*.}
+    PROPORTIONAL_TERM=$(( PROPORTIONAL_TERM + (ERROR * ${FRAC:0:1} / 10) ))
+  fi
+
+  # Integral term: sum of all past errors to eliminate steady-state error
+  # Only accumulate when there's an error to avoid windup
+  if [ "$ERROR" -ne 0 ]; then
+    PID_INTEGRAL_SUM=$((PID_INTEGRAL_SUM + ERROR))
+    
+    # Anti-windup: limit integral term to prevent unbounded growth
+    local -i INTEGRAL_LIMIT=$((TARGET_THRESHOLD * 2))
+    
+    # Clamp integral sum
+    if [ "$PID_INTEGRAL_SUM" -gt "$INTEGRAL_LIMIT" ]; then
+      PID_INTEGRAL_SUM=$INTEGRAL_LIMIT
+    elif [ "$PID_INTEGRAL_SUM" -lt "-$INTEGRAL_LIMIT" ]; then
+      PID_INTEGRAL_SUM=-$INTEGRAL_LIMIT
+    fi
+  fi
+  
+  # I = Ki * integral_sum
+  local -i INTEGRAL_TERM=$((PID_INTEGRAL_SUM * ${KI%.*} / 10))
+  
+  # Add fractional part of Ki if it exists
+  if [[ "$KI" == *"."* ]]; then
+    local FRAC=${KI#*.}
+    INTEGRAL_TERM=$(( INTEGRAL_TERM + (PID_INTEGRAL_SUM * ${FRAC:0:1} / 100) ))
+  fi
+
+  # Derivative term: rate of change of error to predict overshoot
+  local -i ERROR_RATE=$((ERROR - PID_PREVIOUS_ERROR))
+  local -i DERIVATIVE_TERM=$((ERROR_RATE * ${KD%.*}))
+  
+  # Add fractional part of Kd if it exists
+  if [[ "$KD" == *"."* ]]; then
+    local FRAC=${KD#*.}
+    DERIVATIVE_TERM=$(( DERIVATIVE_TERM + (ERROR_RATE * ${FRAC:0:1} / 10) ))
+  fi
+
+  # Calculate total PID output
+  local -i PID_OUTPUT=$((PROPORTIONAL_TERM + INTEGRAL_TERM + DERIVATIVE_TERM))
+
+  # Convert to percentage based on baseline (starting fan speed)
+  local -i PID_BASE_SPEED=$((AUTO_MODE_FAN_SPEED_MIN + (AUTO_MODE_FAN_SPEED_MAX - AUTO_MODE_FAN_SPEED_MIN) / 2))
+  
+  local -i ADJUSTED_SPEED=$((PID_BASE_SPEED + PID_OUTPUT))
+
+  # Clamp to min/max bounds
+  if (( ADJUSTED_SPEED < AUTO_MODE_FAN_SPEED_MIN )); then
+    ADJUSTED_SPEED=$AUTO_MODE_FAN_SPEED_MIN
+  elif (( ADJUSTED_SPEED > AUTO_MODE_FAN_SPEED_MAX )); then
+    ADJUSTED_SPEED=$AUTO_MODE_FAN_SPEED_MAX
+  fi
+
+  # Store previous error for next cycle's derivative calculation
+  PID_PREVIOUS_ERROR=$ERROR
+
+  echo "$ADJUSTED_SPEED"
+}
+
+
+# Apply PID-controlled fan speed
+# Usage : apply_PID_fan_control_profile
+# Returns : success or failure like apply_user_fan_control_profile
+function apply_PID_fan_control_profile() {
+  if ! "$PID_MODE"; then
+    return 1
+  fi
+
+  if "$MONITORING_ONLY_MODE"; then
+    CURRENT_FAN_CONTROL_PROFILE="PID Auto Mode ($DECIMAL_FAN_SPEED%) (monitoring only, not applied)"
+    return
+  fi
+
+  if has_the_server_refused_fan_control; then
+    CURRENT_FAN_CONTROL_PROFILE="Dell default dynamic fan control profile (refused)"
+    return 1
+  fi
+
+  # Convert current speed to hex for ipmitool
+  HEXADECIMAL_FAN_SPEED=$(convert_decimal_value_to_hexadecimal "$DECIMAL_FAN_SPEED")
+
+  local ipmitool_stderr
+  local IS_PROFILE_APPLIED=true
+
+  # Enable manual fan control
+  ipmitool_stderr=$(ipmitool -I $IDRAC_LOGIN_STRING raw 0x30 0x30 0x01 0x00 2>&1 >/dev/null)
+  # shellcheck disable=SC2181  # $? here is the command substitution above, already run; there is no direct command left to negate
+  if [ $? -ne 0 ]; then
+    print_error "Failed to enable PID manual fan control. ipmitool said: $ipmitool_stderr"
+    IS_PROFILE_APPLIED=false
+  else
+    HAS_FAN_CONTROL_EVER_BEEN_ACCEPTED=true
+  fi
+
+  # Set fan speed
+  ipmitool_stderr=$(ipmitool -I $IDRAC_LOGIN_STRING raw 0x30 0x30 0x02 0xff $HEXADECIMAL_FAN_SPEED 2>&1 >/dev/null)
+  # shellcheck disable=SC2181  # $? here is the command substitution above, already run; there is no direct command left to negate
+  if [ $? -ne 0 ]; then
+    print_error "Failed to set PID fan speed to $DECIMAL_FAN_SPEED%. ipmitool said: $ipmitool_stderr"
+    IS_PROFILE_APPLIED=false
+  fi
+
+  if [ -n "$ipmitool_stderr" ]; then
+    note_that_the_server_refuses_fan_control "$ipmitool_stderr"
+  fi
+
+  if ! $IS_PROFILE_APPLIED; then
+    CURRENT_FAN_CONTROL_PROFILE="PID Auto Mode ($DECIMAL_FAN_SPEED%) (not applied)"
+    return 1
+  fi
+
+  CURRENT_FAN_CONTROL_PROFILE="PID Auto Mode ($DECIMAL_FAN_SPEED%)"
+}
+
 # This function applies Dell's default dynamic fan control profile
 # In monitoring only mode, the profile is only logged, not actually applied
 function apply_Dell_default_fan_control_profile() {

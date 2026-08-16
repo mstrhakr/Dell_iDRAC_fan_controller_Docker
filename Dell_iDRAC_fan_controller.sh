@@ -40,12 +40,28 @@ trap 'graceful_exit' SIGINT SIGQUIT SIGTERM
 validate_boolean_parameter "MONITORING_ONLY_MODE" "$MONITORING_ONLY_MODE"
 validate_boolean_parameter "DISABLE_THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE" "$DISABLE_THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE"
 validate_boolean_parameter "KEEP_THIRD_PARTY_PCIE_CARD_COOLING_RESPONSE_STATE_ON_EXIT" "$KEEP_THIRD_PARTY_PCIE_CARD_COOLING_RESPONSE_STATE_ON_EXIT"
+validate_boolean_parameter "AUTO_MODE" "${AUTO_MODE:-false}"
 
-# FAN_SPEED is unchecked text until here and fails silently rather than loudly when malformed : it goes
-# through printf's base detection and converts to 0x00, the documented Dell command for 0% fan duty.
-# Only one stderr line at startup says so, and every temperature table row afterwards keeps naming the
-# speed the user asked for while the fans sit at zero. Refuse to start rather than fail silently
-validate_fan_speed_parameter "FAN_SPEED" "$FAN_SPEED"
+# Set defaults for AUTO_MODE parameters if not provided
+AUTO_MODE="${AUTO_MODE:-false}"
+readonly AUTO_MODE
+PID_GAIN_PROPORTIONAL="${PID_GAIN_PROPORTIONAL:-$PID_GAIN_PROPORTIONAL_DEFAULT}"
+PID_GAIN_INTEGRAL="${PID_GAIN_INTEGRAL:-$PID_GAIN_INTEGRAL_DEFAULT}"
+PID_GAIN_DERIVATIVE="${PID_GAIN_DERIVATIVE:-$PID_GAIN_DERIVATIVE_DEFAULT}"
+AUTO_MODE_TEMPERATURE_MARGIN="${AUTO_MODE_TEMPERATURE_MARGIN:-$AUTO_MODE_TEMPERATURE_MARGIN_DEFAULT}"
+
+# When AUTO_MODE is enabled, FAN_SPEED should not be used
+if "$AUTO_MODE"; then
+  if [ -n "${FAN_SPEED:-}" ] && [ "$FAN_SPEED" != "50" ]; then
+    print_warning "AUTO_MODE is enabled, so FAN_SPEED parameter will be ignored. Remove FAN_SPEED or set AUTO_MODE=false"
+  fi
+else
+  # FAN_SPEED is unchecked text until here and fails silently rather than loudly when malformed : it goes
+  # through printf's base detection and converts to 0x00, the documented Dell command for 0% fan duty.
+  # Only one stderr line at startup says so, and every temperature table row afterwards keeps naming the
+  # speed the user asked for while the fans sit at zero. Refuse to start rather than fail silently
+  validate_fan_speed_parameter "FAN_SPEED" "$FAN_SPEED"
+fi
 # CHECK_INTERVAL paces the whole monitoring loop and is handed straight to sleep, whose exit status the
 # loop never looks at. It is also the controller's reaction time, the fans being pinned between two
 # checks, so an excessively long one is refused as well. The monitoring only mode is passed along
@@ -68,9 +84,15 @@ readonly IPMI_FAILURES_BEFORE_EXIT
 warn_if_the_escalation_exits_on_the_first_failure "$MAXIMUM_CONSECUTIVE_IPMI_FAILURES" "$MAXIMUM_IPMI_UNREACHABLE_DURATION" "$IPMI_FAILURES_BEFORE_EXIT"
 
 # Express FAN_SPEED in both notations, whichever one the user gave it in
-convert_fan_speed_parameter "$FAN_SPEED"
-readonly DECIMAL_FAN_SPEED="$DECIMAL_SPEED"
-readonly HEXADECIMAL_FAN_SPEED="$HEXADECIMAL_SPEED"
+if ! "$AUTO_MODE"; then
+  convert_fan_speed_parameter "$FAN_SPEED"
+  readonly DECIMAL_FAN_SPEED="$DECIMAL_SPEED"
+  readonly HEXADECIMAL_FAN_SPEED="$HEXADECIMAL_SPEED"
+else
+  # In AUTO_MODE, we'll update these dynamically
+  DECIMAL_FAN_SPEED=50
+  HEXADECIMAL_FAN_SPEED="0x32"
+fi
 
 # In local mode, the container runs on the target server itself. Two things depend on that : lm-sensors
 # can only describe the controlled server's CPUs in that mode, and the server can never be observed
@@ -170,7 +192,14 @@ echo "iDRAC/IPMI host: $IDRAC_HOST"
 echo "iDRAC firmware version: $IDRAC_FIRMWARE_VERSION"
 
 # Log the fan speed objective, CPU temperature threshold and check interval
-echo "Fan speed objective: $DECIMAL_FAN_SPEED%"
+if "$AUTO_MODE"; then
+  echo "Fan control mode: AUTO (PID-based adaptive control)"
+  echo "PID Gains - Proportional: $PID_GAIN_PROPORTIONAL, Integral: $PID_GAIN_INTEGRAL, Derivative: $PID_GAIN_DERIVATIVE"
+  echo "Fan speed range: ${AUTO_MODE_FAN_SPEED_MIN}% - ${AUTO_MODE_FAN_SPEED_MAX}%"
+  echo "Temperature margin: ${AUTO_MODE_TEMPERATURE_MARGIN}°C (fan lowered only when temp is this far below threshold)"
+else
+  echo "Fan speed objective: $DECIMAL_FAN_SPEED%"
+fi
 echo "CPU temperature threshold: ${CPU_TEMPERATURE_THRESHOLD}°C${CPU_TEMPERATURE_THRESHOLD_SOURCE}"
 echo "CPU temperature source: $CPU_TEMPERATURE_SOURCE_DESCRIPTION"
 # The unit is only appended when the value doesn't already carry one, "90s" and "5m" being accepted
@@ -347,6 +376,9 @@ warn_if_unexpected_number_of_CPUs
 
 retrieve_temperatures "$SDR_TEMPERATURE_DATA"
 
+# Initialize PID mode if enabled
+initialize_PID_mode
+
 # Reported for information only. Most servers printing this line genuinely have no exhaust sensor --
 # blades and enclosure-housed sleds never do -- so the wording stays as it was ; what changed is that
 # the line no longer decides anything. The sensor is read again on every cycle, so a chassis whose
@@ -481,8 +513,47 @@ while true; do
 
   # Initialize a variable to store the comments displayed when the fan control profile changed
   COMMENT=" -"
-  # Check if any of the detected CPUs is overheating then apply Dell default dynamic fan control profile if true
-  if is_any_CPU_overheating; then
+
+  # Handle PID Auto Mode
+  if "$PID_MODE"; then
+    # Get highest CPU temperature
+    MAX_CPU_TEMP=-999
+    MAX_CPU_INDEX=-1
+    for i in "${!DETECTED_CPU_TEMPERATURES[@]}"; do
+      if [ -n "${DETECTED_CPU_TEMPERATURES[$i]}" ] && is_temperature_reading_valid "${DETECTED_CPU_TEMPERATURES[$i]}"; then
+        if [ "${DETECTED_CPU_TEMPERATURES[$i]}" -gt "$MAX_CPU_TEMP" ]; then
+          MAX_CPU_TEMP="${DETECTED_CPU_TEMPERATURES[$i]}"
+          MAX_CPU_INDEX=$i
+        fi
+      fi
+    done
+
+    # If we have a valid temperature reading, calculate PID fan speed
+    if [ "$MAX_CPU_INDEX" -ge 0 ]; then
+      NEW_FAN_SPEED=0
+      NEW_FAN_SPEED=$(calculate_PID_fan_speed "$MAX_CPU_TEMP" "$CPU_TEMPERATURE_THRESHOLD" "$PID_GAIN_PROPORTIONAL" "$PID_GAIN_INTEGRAL" "$PID_GAIN_DERIVATIVE")
+      
+      DECIMAL_FAN_SPEED=$NEW_FAN_SPEED
+      HEXADECIMAL_FAN_SPEED=$(convert_decimal_value_to_hexadecimal "$DECIMAL_FAN_SPEED")
+      
+      apply_PID_fan_control_profile
+      
+      # Log comment about PID adjustment
+      if [ "$MAX_CPU_TEMP" -gt "$CPU_TEMPERATURE_THRESHOLD" ]; then
+        COMMENT="Overtemp: ${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]} at $MAX_CPU_TEMP°C, PID increasing fan to $DECIMAL_FAN_SPEED%"
+      elif [ "$MAX_CPU_TEMP" -lt $((CPU_TEMPERATURE_THRESHOLD - AUTO_MODE_TEMPERATURE_MARGIN)) ]; then
+        COMMENT="Cool: ${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]} at $MAX_CPU_TEMP°C, PID lowered fan to $DECIMAL_FAN_SPEED%"
+      else
+        COMMENT="Optimal: ${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]} at $MAX_CPU_TEMP°C, PID maintaining $DECIMAL_FAN_SPEED%"
+      fi
+    else
+      # No valid temperature, apply Dell default for safety
+      apply_Dell_default_fan_control_profile
+      COMMENT="No valid CPU temperature could be read, $(fan_control_comment_clause "Dell default dynamic fan control profile applied for safety")"
+    fi
+  
+  # Original logic for non-AUTO_MODE
+  elif is_any_CPU_overheating; then
     apply_Dell_default_fan_control_profile
 
     if ! $IS_DELL_DEFAULT_FAN_CONTROL_PROFILE_APPLIED || $IS_FIRST_MONITORING_CYCLE; then

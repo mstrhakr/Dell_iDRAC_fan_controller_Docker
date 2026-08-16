@@ -67,6 +67,31 @@ readonly MINIMUM_CPU_COLUMN_CONTENT_WIDTH=5
 # slow to become readable after POST, and monitoring one heat source less until it shows up again
 readonly CPU_REMOVAL_CONFIRMING_READINGS=5
 
+# PID Control mode parameters
+# When AUTO_MODE=true, the fan speed is adjusted automatically using a PID (Proportional-Integral-Derivative)
+# controller that maintains CPU temperature near the threshold while minimizing fan speed
+#
+# Default PID gains - these can be tuned for different server thermal behaviors
+# Higher values make the controller respond faster but risk oscillation; lower values are more stable
+# Kp (Proportional gain): Immediate response to temperature error
+# Ki (Integral gain): Eliminates steady-state error over time
+# Kd (Derivative gain): Predicts overshoot and prevents oscillation
+readonly PID_GAIN_PROPORTIONAL_DEFAULT=2.0
+readonly PID_GAIN_INTEGRAL_DEFAULT=0.5
+readonly PID_GAIN_DERIVATIVE_DEFAULT=1.0
+
+# Bounds for fan speed when in AUTO_MODE
+readonly AUTO_MODE_FAN_SPEED_MIN=10
+readonly AUTO_MODE_FAN_SPEED_MAX=100
+
+# Temperature margin: only lower fan speed if temp is this far below threshold (degrees C)
+# Prevents aggressive lowering when close to the limit
+readonly AUTO_MODE_TEMPERATURE_MARGIN_DEFAULT=3
+
+# Integral anti-windup limit: prevents integral term from growing unbounded during steady state
+# Expressed as a percentage of (THRESHOLD - current_temp)
+readonly PID_INTEGRAL_WINDUP_LIMIT=50
+
 # Widths of the two right-hand columns of the temperatures table. The header and the rows are both laid out
 # from these, rather than each repeating a literal of its own, which is how the profile column came to
 # reserve less in the header than the rows were printing into it.
