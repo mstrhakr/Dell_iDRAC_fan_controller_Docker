@@ -27,45 +27,128 @@ func TestParseInterval(t *testing.T) {
 func TestParseFanSpeed(t *testing.T) {
 	v, err := parseFanSpeed("0x32")
 	if err != nil {
-		t.Fatalf("parseFanSpeed hex failed: %v", err)
+		t.Fatalf("parseFanSpeed hex: %v", err)
 	}
 	if v != 50 {
 		t.Fatalf("parseFanSpeed hex = %d, want 50", v)
 	}
 	v, err = parseFanSpeed("20")
 	if err != nil {
-		t.Fatalf("parseFanSpeed decimal failed: %v", err)
+		t.Fatalf("parseFanSpeed decimal: %v", err)
 	}
 	if v != 20 {
 		t.Fatalf("parseFanSpeed decimal = %d, want 20", v)
 	}
 }
 
-func TestPIDDirection(t *testing.T) {
-	c := newController(Config{
-		PIDKp:                     2,
-		PIDKi:                     0.5,
-		PIDKd:                     1,
-		AutoModeFanSpeedMin:       10,
-		AutoModeFanSpeedMax:       100,
-		AutoModeTemperatureMargin: 3,
-		FanSpeed:                  20,
-		AutoMode:                  true,
-	})
-	c.pid.Current = 40
-	hot := c.pidStep(55, 50)
-	if hot <= 40 {
-		t.Fatalf("expected hot step to increase fan, got %d", hot)
+func TestParseBoolStrict(t *testing.T) {
+	if b, err := parseBoolStrict("true"); err != nil || !b {
+		t.Fatalf("expected true, got %v %v", b, err)
 	}
-	cool := c.pidStep(35, 50)
-	if cool > hot {
-		t.Fatalf("expected cool step to not increase above hot output, got %d > %d", cool, hot)
+	if b, err := parseBoolStrict("false"); err != nil || b {
+		t.Fatalf("expected false, got %v %v", b, err)
+	}
+	if _, err := parseBoolStrict("yes"); err == nil {
+		t.Fatal("expected error for 'yes'")
+	}
+}
+
+// newTestController creates a controller with realistic defaults,
+// no IPMI device check (NetworkMode=false would check device path).
+func newTestController() *Controller {
+	cfg := Config{
+		PIDKp:                       2.0,
+		PIDKi:                       0.5,
+		PIDKd:                       1.0,
+		PIDIntegralLimit:            50.0,
+		AutoModeFanSpeedMin:         10,
+		AutoModeFanSpeedMax:         100,
+		AutoModeTemperatureMargin:   5,
+		EMAAlpha:                    0.3,
+		RateOfChangeTriggerPerCycle: 2.0,
+		RateOfChangeBoostGain:       2.0,
+		FanSpeed:                    20,
+		AutoMode:                    true,
+		NetworkMode:                 true, // skip local device check
+	}
+	c := &Controller{
+		cfg: cfg,
+		pid: pidState{current: 40},
+	}
+	return c
+}
+
+func TestPIDDirectionHot(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 40
+	c.ema.value = 45
+	c.ema.seeded = true
+	c.prevSmoothed = 45
+
+	// 55°C, threshold 50 => overtemp, fan must go up
+	speed, _ := c.pidStep(55.0, 50.0)
+	if speed <= 40 {
+		t.Fatalf("overtemp: expected fan > 40, got %d", speed)
+	}
+}
+
+func TestPIDDirectionCool(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 70
+	c.ema.value = 30
+	c.ema.seeded = true
+	c.prevSmoothed = 30
+
+	// 32°C, threshold 50, margin 5 => well below target 45°C, fan must go down
+	speed, _ := c.pidStep(32.0, 50.0)
+	if speed >= 70 {
+		t.Fatalf("cool: expected fan < 70, got %d", speed)
+	}
+}
+
+func TestPIDRateOfChangeBoost(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 30
+	c.ema.value = 40
+	c.ema.seeded = true
+	// Large rise in EMA this cycle: prevSmoothed was 37, now 40 => roc=3 > trigger 2
+	c.prevSmoothed = 37.0
+
+	speedWithROC, roc := c.pidStep(41.0, 50.0)
+	if roc < c.cfg.RateOfChangeTriggerPerCycle {
+		t.Fatalf("expected roc >= %.1f, got %.1f", c.cfg.RateOfChangeTriggerPerCycle, roc)
+	}
+
+	// Without the rate spike the speed should be lower
+	c2 := newTestController()
+	c2.pid.current = 30
+	c2.ema.value = 40
+	c2.ema.seeded = true
+	c2.prevSmoothed = 40.0 // no roc
+	speedWithoutROC, _ := c2.pidStep(41.0, 50.0)
+
+	if speedWithROC <= speedWithoutROC {
+		t.Fatalf("roc boost: expected %d > %d", speedWithROC, speedWithoutROC)
+	}
+}
+
+func TestEMASmoothing(t *testing.T) {
+	var e emaState
+	first := e.update(0.3, 50.0)
+	if first != 50.0 {
+		t.Fatalf("first EMA value should equal seed, got %f", first)
+	}
+	second := e.update(0.3, 60.0)
+	// Should be 0.3*60 + 0.7*50 = 18 + 35 = 53
+	if second != 53.0 {
+		t.Fatalf("EMA(0.3, 60 after 50) = %f, want 53.0", second)
 	}
 }
 
 func TestParseTempField(t *testing.T) {
 	v, ok := parseTempField("45 degrees C")
 	if !ok || v != 45 {
-		t.Fatalf("parseTempField failed: ok=%v v=%d", ok, v)
+		t.Fatalf("parseTempField: ok=%v v=%d", ok, v)
 	}
 }
+
