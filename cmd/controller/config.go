@@ -13,12 +13,50 @@ import (
 
 const defaultAutoTemperatureThreshold = 60
 
+type fanProfile struct {
+	name      string
+	threshold int
+	margin    int
+	kp        float64
+	ki        float64
+	kd        float64
+	boost     float64
+	autoMode  bool
+}
+
+func resolveFanProfile(value string) (fanProfile, error) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "balanced":
+		return fanProfile{"balanced", 60, 3, 1.5, 0.1, 0.5, 1.0, true}, nil
+	case "quiet":
+		return fanProfile{"quiet", 65, 3, 0.8, 0.05, 0.3, 0.5, true}, nil
+	case "performance":
+		return fanProfile{"performance", 55, 4, 2.0, 0.15, 0.8, 1.5, true}, nil
+	case "manual":
+		return fanProfile{"manual", 60, 3, 1.5, 0.1, 0.5, 1.0, false}, nil
+	default:
+		return fanProfile{}, errors.New("FAN_PROFILE must be quiet, balanced, performance, or manual")
+	}
+}
+
+func (p fanProfile) apply(cfg *Config) {
+	cfg.FanProfile = p.name
+	cfg.CPUTemperatureThreshold = p.threshold
+	cfg.AutoModeTemperatureMargin = p.margin
+	cfg.PIDKp = p.kp
+	cfg.PIDKi = p.ki
+	cfg.PIDKd = p.kd
+	cfg.RateOfChangeBoostGain = p.boost
+	cfg.AutoMode = p.autoMode
+}
+
 // loadConfig parses environment variables and returns a Config struct.
 func loadConfig() (Config, error) {
 	cfg := Config{
 		IDRACHost:                        envOrDefault("IDRAC_HOST", "local"),
 		IDRACUsername:                    os.Getenv("IDRAC_USERNAME"),
 		IDRACPassword:                    os.Getenv("IDRAC_PASSWORD"),
+		FanSpeed:                         5,
 		CheckInterval:                    0, // Will be auto-calculated
 		ApplyInterval:                    0, // Will be auto-calculated
 		LogInterval:                      0, // Will be auto-calculated
@@ -46,15 +84,22 @@ func loadConfig() (Config, error) {
 	}
 
 	var err error
+	profile, err := resolveFanProfile(envOrDefault("FAN_PROFILE", "balanced"))
+	if err != nil {
+		return cfg, err
+	}
+	profile.apply(&cfg)
 
 	// Boolean flags
 	cfg.MonitoringOnlyMode, err = parseBoolStrict(envOrDefault("MONITORING_ONLY_MODE", "false"))
 	if err != nil {
 		return cfg, fmt.Errorf("MONITORING_ONLY_MODE: %w", err)
 	}
-	cfg.AutoMode, err = parseBoolStrict(envOrDefault("AUTO_MODE", "true"))
-	if err != nil {
-		return cfg, fmt.Errorf("AUTO_MODE: %w", err)
+	if value, ok := optionalEnv("AUTO_MODE"); ok {
+		cfg.AutoMode, err = parseBoolStrict(value)
+		if err != nil {
+			return cfg, fmt.Errorf("AUTO_MODE: %w", err)
+		}
 	}
 	cfg.DisableThirdPartyPCIeCooling, err = parseBoolStrict(envOrDefault("DISABLE_THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE", "false"))
 	if err != nil {
@@ -74,15 +119,19 @@ func loadConfig() (Config, error) {
 	}
 
 	// Fan speed
-	cfg.FanSpeed, err = parseFanSpeed(envOrDefault("FAN_SPEED", "5"))
-	if err != nil {
-		return cfg, fmt.Errorf("FAN_SPEED: %w", err)
+	if value, ok := optionalEnv("FAN_SPEED"); ok {
+		cfg.FanSpeed, err = parseFanSpeed(value)
+		if err != nil {
+			return cfg, fmt.Errorf("FAN_SPEED: %w", err)
+		}
 	}
 
 	// Temperature thresholds
-	cfg.CPUTemperatureThreshold, err = parseTemperatureThreshold(envOrDefault("CPU_TEMPERATURE_THRESHOLD", "auto"))
-	if err != nil {
-		return cfg, fmt.Errorf("CPU_TEMPERATURE_THRESHOLD: %w", err)
+	if value, ok := optionalEnv("CPU_TEMPERATURE_THRESHOLD"); ok {
+		cfg.CPUTemperatureThreshold, err = parseTemperatureThreshold(value)
+		if err != nil {
+			return cfg, fmt.Errorf("CPU_TEMPERATURE_THRESHOLD: %w", err)
+		}
 	}
 
 	cfg.GPUTemperatureSource = normalizeGPUSource(envOrDefault("GPU_TEMPERATURE_SOURCE", "disabled"))
@@ -95,23 +144,31 @@ func loadConfig() (Config, error) {
 	}
 
 	// PID gains
-	cfg.PIDKp, err = parseFloat(envOrDefault("PID_GAIN_PROPORTIONAL", "1.5"))
-	if err != nil {
-		return cfg, fmt.Errorf("PID_GAIN_PROPORTIONAL: %w", err)
+	if value, ok := optionalEnv("PID_GAIN_PROPORTIONAL"); ok {
+		cfg.PIDKp, err = parseFloat(value)
+		if err != nil {
+			return cfg, fmt.Errorf("PID_GAIN_PROPORTIONAL: %w", err)
+		}
 	}
-	cfg.PIDKi, err = parseFloat(envOrDefault("PID_GAIN_INTEGRAL", "0.1"))
-	if err != nil {
-		return cfg, fmt.Errorf("PID_GAIN_INTEGRAL: %w", err)
+	if value, ok := optionalEnv("PID_GAIN_INTEGRAL"); ok {
+		cfg.PIDKi, err = parseFloat(value)
+		if err != nil {
+			return cfg, fmt.Errorf("PID_GAIN_INTEGRAL: %w", err)
+		}
 	}
-	cfg.PIDKd, err = parseFloat(envOrDefault("PID_GAIN_DERIVATIVE", "0.5"))
-	if err != nil {
-		return cfg, fmt.Errorf("PID_GAIN_DERIVATIVE: %w", err)
+	if value, ok := optionalEnv("PID_GAIN_DERIVATIVE"); ok {
+		cfg.PIDKd, err = parseFloat(value)
+		if err != nil {
+			return cfg, fmt.Errorf("PID_GAIN_DERIVATIVE: %w", err)
+		}
 	}
 
 	// PID margins and limits
-	cfg.AutoModeTemperatureMargin, err = parsePositiveIntInRange(envOrDefault("AUTO_MODE_TEMPERATURE_MARGIN", "3"), 0, 20)
-	if err != nil {
-		return cfg, fmt.Errorf("AUTO_MODE_TEMPERATURE_MARGIN: %w", err)
+	if value, ok := optionalEnv("AUTO_MODE_TEMPERATURE_MARGIN"); ok {
+		cfg.AutoModeTemperatureMargin, err = parsePositiveIntInRange(value, 0, 20)
+		if err != nil {
+			return cfg, fmt.Errorf("AUTO_MODE_TEMPERATURE_MARGIN: %w", err)
+		}
 	}
 
 	// EMA and rate-of-change
@@ -127,9 +184,11 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("RATE_OF_CHANGE_TRIGGER: %w", err)
 	}
-	cfg.RateOfChangeBoostGain, err = parseFloat(envOrDefault("RATE_OF_CHANGE_BOOST", "1.0"))
-	if err != nil {
-		return cfg, fmt.Errorf("RATE_OF_CHANGE_BOOST: %w", err)
+	if value, ok := optionalEnv("RATE_OF_CHANGE_BOOST"); ok {
+		cfg.RateOfChangeBoostGain, err = parseFloat(value)
+		if err != nil {
+			return cfg, fmt.Errorf("RATE_OF_CHANGE_BOOST: %w", err)
+		}
 	}
 
 	// Local mode: verify IPMI device is available
@@ -181,10 +240,11 @@ func loadConfig() (Config, error) {
 	}
 
 	// Maximum IPMI unreachable duration
-	maxIPMIUnreachable := strings.TrimSpace(os.Getenv("MAXIMUM_IPMI_UNREACHABLE_DURATION"))
-	if maxIPMIUnreachable == "" {
+	maxIPMIUnreachable, configuredMaxIPMIUnreachable := os.LookupEnv("MAXIMUM_IPMI_UNREACHABLE_DURATION")
+	maxIPMIUnreachable = strings.TrimSpace(maxIPMIUnreachable)
+	if configuredMaxIPMIUnreachable && maxIPMIUnreachable == "" {
 		cfg.MaximumIPMIUnreachableDuration = 0
-	} else {
+	} else if configuredMaxIPMIUnreachable {
 		cfg.MaximumIPMIUnreachableDuration, err = parseInterval(maxIPMIUnreachable)
 		if err != nil {
 			return cfg, fmt.Errorf("MAXIMUM_IPMI_UNREACHABLE_DURATION: %w", err)
@@ -215,6 +275,12 @@ func envOrDefault(name, fallback string) string {
 		return fallback
 	}
 	return v
+}
+
+func optionalEnv(name string) (string, bool) {
+	value, ok := os.LookupEnv(name)
+	value = strings.TrimSpace(value)
+	return value, ok && value != ""
 }
 
 func parseBoolStrict(v string) (bool, error) {

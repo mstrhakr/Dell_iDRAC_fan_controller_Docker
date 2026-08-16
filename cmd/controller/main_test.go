@@ -64,6 +64,31 @@ func TestParseAutoTemperatureThreshold(t *testing.T) {
 	}
 }
 
+func TestResolveFanProfile(t *testing.T) {
+	cases := map[string]struct {
+		threshold int
+		margin    int
+		autoMode  bool
+	}{
+		"quiet":       {65, 3, true},
+		"balanced":    {60, 3, true},
+		"performance": {55, 4, true},
+		"manual":      {60, 3, false},
+	}
+	for name, want := range cases {
+		profile, err := resolveFanProfile(name)
+		if err != nil {
+			t.Fatalf("resolveFanProfile(%q): %v", name, err)
+		}
+		if profile.threshold != want.threshold || profile.margin != want.margin || profile.autoMode != want.autoMode {
+			t.Fatalf("resolveFanProfile(%q) = %+v, want threshold=%d margin=%d auto=%t", name, profile, want.threshold, want.margin, want.autoMode)
+		}
+	}
+	if _, err := resolveFanProfile("turbo"); err == nil {
+		t.Fatal("resolveFanProfile(turbo) succeeded, want error")
+	}
+}
+
 func TestParseBoolStrict(t *testing.T) {
 	if b, err := parseBoolStrict("true"); err != nil || !b {
 		t.Fatalf("expected true, got %v %v", b, err)

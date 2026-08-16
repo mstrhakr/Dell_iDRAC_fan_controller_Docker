@@ -25,6 +25,7 @@ type Config struct {
 	GPUTemperatureThreshold int
 
 	// PID tuning
+	FanProfile                string
 	AutoMode                  bool
 	PIDKp                     float64
 	PIDKi                     float64

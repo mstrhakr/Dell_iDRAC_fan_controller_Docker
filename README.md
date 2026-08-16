@@ -225,6 +225,12 @@ All parameters are optional as they have default values (including default iDRAC
 - `IDRAC_HOST` parameter can be set to "local" or to your distant iDRAC's IP address. **Default** value is "local".
 - `IDRAC_USERNAME` parameter is only necessary if you're adressing a distant iDRAC. **Default** value is "root".
 - `IDRAC_PASSWORD` parameter is only necessary if you're adressing a distant iDRAC. **Default** value is "calvin".
+- `FAN_PROFILE` selects a startup-only fan-control preset. **Default** value is `balanced`.
+  - `quiet` targets 62°C with a gradual PID response.
+  - `balanced` targets 57°C and is the recommended general-purpose setting.
+  - `performance` targets 51°C with an earlier, firmer response.
+  - `manual` disables PID control and uses `FAN_SPEED` instead.
+  - Explicit low-level settings such as `CPU_TEMPERATURE_THRESHOLD`, `AUTO_MODE_TEMPERATURE_MARGIN`, `PID_GAIN_*`, `RATE_OF_CHANGE_BOOST`, or `AUTO_MODE` override the matching profile setting. Restart the container after changing a profile.
 - `AUTO_MODE` enables the automatic PID fan controller. **Default** value is true. It adjusts the fan command from the hottest CPU or GPU temperature, with bounded per-cycle changes to avoid oscillation. Set it to `false` to use the fixed `FAN_SPEED` behavior instead.
 - `FAN_SPEED` parameter is the duty cycle the fans are held at while your fan control profile is applied. It can be set as a decimal percentage (from 0 to 100%) or as the same value in hexadecimal (from 0x00 to 0x64). **Default** value is 5(%).
   - Anything outside that range stops the container at startup rather than being clamped or passed through to the fans, `200` having once reached `ipmitool` as `0xc8`.

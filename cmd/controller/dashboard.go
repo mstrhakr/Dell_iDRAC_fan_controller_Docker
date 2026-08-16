@@ -44,6 +44,12 @@ func (c *Controller) dashboardStatsHandler(w http.ResponseWriter, _ *http.Reques
 		TargetTemperature    int               `json:"target_temperature"`
 		ThresholdTemperature int               `json:"threshold_temperature"`
 		AutoMode             bool              `json:"auto_mode"`
+		FanProfile           string            `json:"fan_profile"`
+		PIDKp                float64           `json:"pid_kp"`
+		PIDKi                float64           `json:"pid_ki"`
+		PIDKd                float64           `json:"pid_kd"`
+		Margin               int               `json:"margin"`
+		RateBoost            float64           `json:"rate_boost"`
 	}{
 		Now:                  current,
 		History:              history,
@@ -52,6 +58,12 @@ func (c *Controller) dashboardStatsHandler(w http.ResponseWriter, _ *http.Reques
 		TargetTemperature:    c.cfg.CPUTemperatureThreshold - c.cfg.AutoModeTemperatureMargin,
 		ThresholdTemperature: c.cfg.CPUTemperatureThreshold,
 		AutoMode:             c.cfg.AutoMode,
+		FanProfile:           c.cfg.FanProfile,
+		PIDKp:                c.cfg.PIDKp,
+		PIDKi:                c.cfg.PIDKi,
+		PIDKd:                c.cfg.PIDKd,
+		Margin:               c.cfg.AutoModeTemperatureMargin,
+		RateBoost:            c.cfg.RateOfChangeBoostGain,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -111,7 +123,7 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     <div class="card"><div class="label">Control Source</div><div id="source" class="value">-</div></div>
     <div class="card"><div class="label">Measured Fan RPM</div><div id="rpm" class="value">-</div><div id="rpmDetail" class="status">Refreshed with the summary window</div></div>
   </div>
-  <div class="card decision"><div><div class="label">Current decision</div><strong id="profile">Waiting for first sample</strong><p class="decision-note" id="note">The controller will publish its latest fan decision here.</p></div><div class="facts"><span>Target<b id="target">-</b></span><span>Threshold<b id="threshold">-</b></span><span>Samples<b id="samples">0</b></span></div></div>
+  <div class="card decision"><div><div class="label">Current decision</div><strong id="profile">Waiting for first sample</strong><p class="decision-note" id="note">The controller will publish its latest fan decision here.</p></div><div class="facts"><span>Profile<b id="fanProfile">--</b></span><span>Target<b id="target">-</b></span><span>Threshold<b id="threshold">-</b></span><span>Samples<b id="samples">0</b></span></div></div>
   <div class="chart">
     <div class="chart-header"><div><div class="title">Temperature history</div><div id="tempSummary" class="chart-summary">Waiting for samples</div></div><div class="legend"><span><i class="swatch"></i>Raw IPMI</span><span><i class="swatch ema"></i>EMA</span><span><i class="swatch target"></i>Target</span></div></div>
     <svg id="tempChart" viewBox="0 0 1000 220"></svg>
@@ -206,6 +218,7 @@ async function refresh() {
   document.getElementById('note').textContent = now.comment || 'The controller will publish its latest fan decision here.';
   document.getElementById('target').textContent = Number.isFinite(d.target_temperature) ? (d.target_temperature + 'C') : '-';
   document.getElementById('threshold').textContent = Number.isFinite(d.threshold_temperature) ? (d.threshold_temperature + 'C') : '-';
+  document.getElementById('fanProfile').textContent = d.fan_profile || '--';
 
   const h = Array.isArray(d.history) ? d.history : [];
   document.getElementById('samples').textContent = h.length;
@@ -240,7 +253,11 @@ async function refresh() {
     ' check_interval=' + d.check_interval_sec + 's' +
     ' log_interval=' + d.log_interval_sec + 's' +
     ' profile=' + (now.profile || '-') +
-    ' mode=' + (d.auto_mode ? 'automatic' : 'static');
+    ' mode=' + (d.auto_mode ? 'automatic' : 'static') +
+    ' profile=' + (d.fan_profile || '-') +
+    ' Kp/Ki/Kd=' + d.pid_kp + '/' + d.pid_ki + '/' + d.pid_kd +
+    ' margin=' + d.margin + 'C' +
+    ' rate_boost=' + d.rate_boost;
   document.getElementById('status').textContent = now.ts ? ('Live telemetry | latest sample ' + new Date(now.ts * 1000).toLocaleTimeString()) : 'Waiting for telemetry';
 }
 

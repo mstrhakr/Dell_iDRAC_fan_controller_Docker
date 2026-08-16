@@ -97,6 +97,7 @@ func (c *Controller) recordSample(sample cycleSample) {
 }
 
 func (c *Controller) logStartup() {
+	fmt.Printf("Fan profile          : %s\n", c.cfg.FanProfile)
 	if c.cfg.AutoMode {
 		target := c.cfg.CPUTemperatureThreshold - c.cfg.AutoModeTemperatureMargin
 		fmt.Println("Fan control mode     : AUTO (Go PID controller)")
