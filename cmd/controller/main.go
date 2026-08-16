@@ -67,6 +67,9 @@ func (c *Controller) run() error {
 	}
 
 	c.logStartup()
+	if c.cfg.DashboardEnabled {
+		c.startDashboard()
+	}
 
 	for {
 		start := time.Now()
@@ -138,7 +141,7 @@ func (c *Controller) cycle() error {
 	// Decide fan speed and action.
 	profile := "-"
 	comment := "-"
-	appliedSpeed := c.pid.current
+	appliedFan := c.safeRound(c.pid.current)
 
 	switch {
 	case c.cfg.MonitoringOnlyMode:
@@ -147,8 +150,9 @@ func (c *Controller) cycle() error {
 
 	case c.cfg.AutoMode && controlLabel != "":
 		prevSmoothed := c.prevSmoothed
+		prevFan := c.safeRound(c.pid.current)
 		speed, roc := c.pidStep(smoothed, float64(controlThreshold))
-		appliedSpeed = float64(speed)
+		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(speed); err != nil {
 				return err
@@ -166,7 +170,7 @@ func (c *Controller) cycle() error {
 		case smoothed > target && float64(speed) > prevSmoothed:
 			comment = fmt.Sprintf("Stabilizing: %s EMA=%.1f°C, fan↑%d%%",
 				controlLabel, smoothed, speed)
-		case float64(speed) < appliedSpeed:
+		case speed < prevFan:
 			comment = fmt.Sprintf("Cooling: %s EMA=%.1f°C, fan↓%d%%",
 				controlLabel, smoothed, speed)
 		default:
@@ -181,7 +185,7 @@ func (c *Controller) cycle() error {
 				return err
 			}
 		}
-		appliedSpeed = float64(c.cfg.FanSpeed)
+		appliedFan = c.cfg.FanSpeed
 		profile = fmt.Sprintf("User static (%d%%)", c.cfg.FanSpeed)
 		comment = "Temperatures within thresholds"
 
@@ -192,6 +196,7 @@ func (c *Controller) cycle() error {
 			}
 		}
 		profile = "Dell default (safety)"
+		appliedFan = -1
 		if snap.gpu != nil && *snap.gpu > c.cfg.GPUTemperatureThreshold {
 			comment = fmt.Sprintf("GPU %d°C > %d°C threshold", *snap.gpu, c.cfg.GPUTemperatureThreshold)
 		} else if hasCPU {
@@ -201,22 +206,16 @@ func (c *Controller) cycle() error {
 		}
 	}
 
-	// Format and log.
-	ts := time.Now().Format("02-01-2006 15:04:05")
-	inlet := "-"
-	if snap.inlet != nil {
-		inlet = fmt.Sprintf("%d°C", *snap.inlet)
+	sample := cycleSample{
+		timestamp: time.Now(),
+		inlet:     snap.inlet,
+		raw:       controlRaw,
+		ema:       smoothed,
+		fan:       appliedFan,
+		profile:   profile,
+		comment:   comment,
+		source:    controlLabel,
 	}
-	raw := "-"
-	if hasCPU || snap.gpu != nil {
-		raw = fmt.Sprintf("%d°C", controlRaw)
-	}
-	ema := "-"
-	if c.ema.seeded {
-		ema = fmt.Sprintf("%.1f°C", smoothed)
-	}
-	fan := fmt.Sprintf("%.0f%%", appliedSpeed)
-
-	c.logCycle(ts, inlet, raw, ema, fan, profile, comment)
+	c.recordSample(sample)
 	return nil
 }

@@ -37,6 +37,10 @@ func loadConfig() (Config, error) {
 		RateOfChangeBoostGain:            2.0,
 		GPUTemperatureSource:             "disabled",
 		GPUTemperatureThreshold:          80,
+		VerboseCycleLogging:              false,
+		DashboardEnabled:                 false,
+		DashboardListenAddress:           ":8080",
+		DashboardSampleLimit:             300,
 	}
 
 	var err error
@@ -57,6 +61,14 @@ func loadConfig() (Config, error) {
 	cfg.KeepThirdPartyCoolingStateOnExit, err = parseBoolStrict(envOrDefault("KEEP_THIRD_PARTY_PCIE_CARD_COOLING_RESPONSE_STATE_ON_EXIT", "false"))
 	if err != nil {
 		return cfg, fmt.Errorf("KEEP_THIRD_PARTY_PCIE_CARD_COOLING_RESPONSE_STATE_ON_EXIT: %w", err)
+	}
+	cfg.VerboseCycleLogging, err = parseBoolStrict(envOrDefault("VERBOSE_CYCLE_LOGGING", "false"))
+	if err != nil {
+		return cfg, fmt.Errorf("VERBOSE_CYCLE_LOGGING: %w", err)
+	}
+	cfg.DashboardEnabled, err = parseBoolStrict(envOrDefault("ENABLE_DASHBOARD", "false"))
+	if err != nil {
+		return cfg, fmt.Errorf("ENABLE_DASHBOARD: %w", err)
 	}
 
 	// Fan speed
@@ -174,6 +186,19 @@ func loadConfig() (Config, error) {
 		cfg.MaximumIPMIUnreachableDuration, err = parseInterval(maxIPMIUnreachable)
 		if err != nil {
 			return cfg, fmt.Errorf("MAXIMUM_IPMI_UNREACHABLE_DURATION: %w", err)
+		}
+	}
+
+	dashboardListenAddress := strings.TrimSpace(os.Getenv("DASHBOARD_LISTEN_ADDRESS"))
+	if dashboardListenAddress != "" {
+		cfg.DashboardListenAddress = dashboardListenAddress
+	}
+
+	dashboardSampleLimit := strings.TrimSpace(os.Getenv("DASHBOARD_SAMPLE_LIMIT"))
+	if dashboardSampleLimit != "" {
+		cfg.DashboardSampleLimit, err = parsePositiveIntInRange(dashboardSampleLimit, 30, 5000)
+		if err != nil {
+			return cfg, fmt.Errorf("DASHBOARD_SAMPLE_LIMIT: %w", err)
 		}
 	}
 
@@ -300,5 +325,8 @@ func newController(cfg Config) *Controller {
 		cfg:                 cfg,
 		pid:                 pidState{current: initial},
 		ipmiFailuresAllowed: allowed,
+		dashboard: dashboardState{
+			history: make([]dashboardSample, 0, cfg.DashboardSampleLimit),
+		},
 	}
 }

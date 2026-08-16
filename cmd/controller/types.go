@@ -2,6 +2,7 @@ package main
 
 import (
 	"regexp"
+	"sync"
 	"time"
 )
 
@@ -45,6 +46,10 @@ type Config struct {
 	DisableThirdPartyPCIeCooling     bool
 	KeepThirdPartyCoolingStateOnExit bool
 	MonitoringOnlyMode               bool
+	VerboseCycleLogging              bool
+	DashboardEnabled                 bool
+	DashboardListenAddress           string
+	DashboardSampleLimit             int
 }
 
 // emaState tracks a single exponential moving average.
@@ -78,6 +83,10 @@ type Controller struct {
 	prevSmoothed        float64
 	ipmiFailures        int
 	ipmiFailuresAllowed int
+	statsMu             sync.RWMutex
+	window              logWindow
+	lastSummaryLog      time.Time
+	dashboard           dashboardState
 }
 
 // Snapshot contains a single temperature reading cycle.
@@ -86,6 +95,52 @@ type snapshot struct {
 	inlet    *int
 	exhaust  *int
 	gpu      *int
+}
+
+// cycleSample contains one control loop sample used for logging and dashboard updates.
+type cycleSample struct {
+	timestamp time.Time
+	inlet     *int
+	raw       int
+	ema       float64
+	fan       int
+	profile   string
+	comment   string
+	source    string
+}
+
+// logWindow stores aggregate metrics between summary log flushes.
+type logWindow struct {
+	count       int
+	rawMin      int
+	rawMax      int
+	rawSum      int
+	emaMin      float64
+	emaMax      float64
+	emaSum      float64
+	fanMin      int
+	fanMax      int
+	fanSum      int
+	lastProfile string
+	lastComment string
+	lastSource  string
+}
+
+// dashboardSample is the lightweight time-series point exposed by the dashboard API.
+type dashboardSample struct {
+	TimestampUnix int64   `json:"ts"`
+	Raw           int     `json:"raw"`
+	EMA           float64 `json:"ema"`
+	Fan           int     `json:"fan"`
+	Inlet         *int    `json:"inlet,omitempty"`
+	Source        string  `json:"source"`
+	Profile       string  `json:"profile"`
+}
+
+// dashboardState stores current and recent controller samples.
+type dashboardState struct {
+	current dashboardSample
+	history []dashboardSample
 }
 
 // IPMI device paths for local mode.
