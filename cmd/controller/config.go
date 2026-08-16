@@ -11,6 +11,8 @@ import (
 	"time"
 )
 
+const defaultAutoTemperatureThreshold = 60
+
 // loadConfig parses environment variables and returns a Config struct.
 func loadConfig() (Config, error) {
 	cfg := Config{
@@ -107,7 +109,7 @@ func loadConfig() (Config, error) {
 	}
 
 	// PID margins and limits
-	cfg.AutoModeTemperatureMargin, err = parsePositiveIntInRange(envOrDefault("AUTO_MODE_TEMPERATURE_MARGIN", "5"), 0, 20)
+	cfg.AutoModeTemperatureMargin, err = parsePositiveIntInRange(envOrDefault("AUTO_MODE_TEMPERATURE_MARGIN", "3"), 0, 20)
 	if err != nil {
 		return cfg, fmt.Errorf("AUTO_MODE_TEMPERATURE_MARGIN: %w", err)
 	}
@@ -250,7 +252,7 @@ func parseFanSpeed(v string) (int, error) {
 
 func parseTemperatureThreshold(v string) (int, error) {
 	if strings.ToLower(strings.TrimSpace(v)) == "auto" {
-		return 50, nil
+		return defaultAutoTemperatureThreshold, nil
 	}
 	return parsePositiveIntInRange(v, 20, 125)
 }

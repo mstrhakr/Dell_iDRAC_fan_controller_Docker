@@ -54,6 +54,16 @@ func TestParseFanSpeed(t *testing.T) {
 	}
 }
 
+func TestParseAutoTemperatureThreshold(t *testing.T) {
+	threshold, err := parseTemperatureThreshold("auto")
+	if err != nil {
+		t.Fatalf("parseTemperatureThreshold(auto): %v", err)
+	}
+	if threshold != defaultAutoTemperatureThreshold {
+		t.Fatalf("auto threshold = %d, want %d", threshold, defaultAutoTemperatureThreshold)
+	}
+}
+
 func TestParseBoolStrict(t *testing.T) {
 	if b, err := parseBoolStrict("true"); err != nil || !b {
 		t.Fatalf("expected true, got %v %v", b, err)
@@ -70,16 +80,16 @@ func TestParseBoolStrict(t *testing.T) {
 // no IPMI device check (NetworkMode=false would check device path).
 func newTestController() *Controller {
 	cfg := Config{
-		PIDKp:                       2.0,
-		PIDKi:                       0.5,
-		PIDKd:                       1.0,
-		PIDIntegralLimit:            50.0,
+		PIDKp:                       1.5,
+		PIDKi:                       0.1,
+		PIDKd:                       0.5,
+		PIDIntegralLimit:            20.0,
 		AutoModeFanSpeedMin:         10,
 		AutoModeFanSpeedMax:         100,
-		AutoModeTemperatureMargin:   5,
+		AutoModeTemperatureMargin:   3,
 		EMAAlpha:                    0.3,
 		RateOfChangeTriggerPerCycle: 2.0,
-		RateOfChangeBoostGain:       2.0,
+		RateOfChangeBoostGain:       1.0,
 		FanSpeed:                    20,
 		AutoMode:                    true,
 		NetworkMode:                 true, // skip local device check
@@ -186,6 +196,20 @@ func TestPIDClearsIntegralAtTarget(t *testing.T) {
 	}
 	if speed >= 60 {
 		t.Fatalf("fan speed at target = %d%%, want it to start decreasing", speed)
+	}
+}
+
+func TestPIDLowersFanBelowAutomaticTarget(t *testing.T) {
+	c := newTestController()
+	c.pid.current = 100
+	c.prevSmoothed = 48
+	c.hasPrevSmoothed = true
+
+	for range 5 {
+		c.pidStep(47.5, float64(defaultAutoTemperatureThreshold))
+	}
+	if c.pid.current >= 100 {
+		t.Fatalf("fan stayed at %.0f%% below automatic target", c.pid.current)
 	}
 }
 
