@@ -136,6 +136,7 @@ type dashboardSample struct {
 	Inlet         *int    `json:"inlet,omitempty"`
 	Source        string  `json:"source"`
 	Profile       string  `json:"profile"`
+	Comment       string  `json:"comment"`
 }
 
 // dashboardState stores current and recent controller samples.
