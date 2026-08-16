@@ -137,6 +137,9 @@ func (c *Controller) cycle() error {
 
 	// Update EMA.
 	smoothed := c.ema.update(c.cfg.EMAAlpha, float64(controlRaw))
+	sampleTimestamp := time.Now()
+	target := float64(controlThreshold - c.cfg.AutoModeTemperatureMargin)
+	trend := c.recordTrend(sampleTimestamp, smoothed, target, c.safeRound(c.pid.current))
 
 	// Decide fan speed and action.
 	profile := "-"
@@ -151,6 +154,13 @@ func (c *Controller) cycle() error {
 	case c.cfg.AutoMode && controlLabel != "":
 		prevFan := c.safeRound(c.pid.current)
 		speed, roc := c.pidStep(smoothed, float64(controlThreshold))
+		if trend.boost > 0 && speed >= prevFan && speed < trendBoostFanCeiling {
+			speed += trend.boost
+			if speed > trendBoostFanCeiling {
+				speed = trendBoostFanCeiling
+			}
+			c.pid.current = float64(speed)
+		}
 		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(speed); err != nil {
@@ -158,8 +168,10 @@ func (c *Controller) cycle() error {
 			}
 		}
 		profile = fmt.Sprintf("PID Auto Mode (%d%%)", speed)
-		target := float64(controlThreshold - c.cfg.AutoModeTemperatureMargin)
 		switch {
+		case trend.boost > 0:
+			comment = fmt.Sprintf("Sustained warming: 30s average %.1f°C above 90s %.1f°C, fan↑%d%%",
+				trend.average30, trend.average90, speed)
 		case roc >= c.cfg.RateOfChangeTriggerPerCycle:
 			comment = fmt.Sprintf("Rising fast (+%.1f°C/cycle): %s raw=%d°C, boosted to %d%%",
 				roc, controlLabel, controlRaw, speed)
@@ -204,16 +216,20 @@ func (c *Controller) cycle() error {
 	}
 
 	sample := cycleSample{
-		timestamp: time.Now(),
-		inlet:     snap.inlet,
-		raw:       controlRaw,
-		ema:       smoothed,
-		fan:       appliedFan,
-		profile:   profile,
-		comment:   comment,
-		source:    controlLabel,
-		fanRPMMin: snap.fanRPMMin,
-		fanRPMMax: snap.fanRPMMax,
+		timestamp:  sampleTimestamp,
+		inlet:      snap.inlet,
+		raw:        controlRaw,
+		ema:        smoothed,
+		fan:        appliedFan,
+		profile:    profile,
+		comment:    comment,
+		source:     controlLabel,
+		trend30:    trend.average30,
+		trend60:    trend.average60,
+		trend90:    trend.average90,
+		trendBoost: trend.boost,
+		fanRPMMin:  snap.fanRPMMin,
+		fanRPMMax:  snap.fanRPMMax,
 	}
 	c.recordSample(sample)
 	return nil

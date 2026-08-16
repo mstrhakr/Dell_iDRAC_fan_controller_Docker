@@ -76,6 +76,20 @@ type pidState struct {
 	current   float64
 }
 
+type trendSample struct {
+	timestamp time.Time
+	temp      float64
+}
+
+type trendState struct {
+	samples   []trendSample
+	average30 float64
+	average60 float64
+	average90 float64
+	boost     int
+	lastBoost time.Time
+}
+
 // Controller is the main fan control orchestrator.
 type Controller struct {
 	cfg                 Config
@@ -83,6 +97,7 @@ type Controller struct {
 	ema                 emaState
 	prevSmoothed        float64
 	hasPrevSmoothed     bool
+	trend               trendState
 	ipmiFailures        int
 	ipmiFailuresAllowed int
 	statsMu             sync.RWMutex
@@ -106,16 +121,20 @@ type snapshot struct {
 
 // cycleSample contains one control loop sample used for logging and dashboard updates.
 type cycleSample struct {
-	timestamp time.Time
-	inlet     *int
-	raw       int
-	ema       float64
-	fan       int
-	profile   string
-	comment   string
-	source    string
-	fanRPMMin *int
-	fanRPMMax *int
+	timestamp  time.Time
+	inlet      *int
+	raw        int
+	ema        float64
+	fan        int
+	profile    string
+	comment    string
+	source     string
+	trend30    float64
+	trend60    float64
+	trend90    float64
+	trendBoost int
+	fanRPMMin  *int
+	fanRPMMax  *int
 }
 
 // logWindow stores aggregate metrics between summary log flushes.
@@ -145,6 +164,10 @@ type dashboardSample struct {
 	Source        string  `json:"source"`
 	Profile       string  `json:"profile"`
 	Comment       string  `json:"comment"`
+	Trend30       float64 `json:"trend_30"`
+	Trend60       float64 `json:"trend_60"`
+	Trend90       float64 `json:"trend_90"`
+	TrendBoost    int     `json:"trend_boost"`
 	FanRPMMin     *int    `json:"fan_rpm_min,omitempty"`
 	FanRPMMax     *int    `json:"fan_rpm_max,omitempty"`
 }

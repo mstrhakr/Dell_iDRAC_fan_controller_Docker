@@ -238,6 +238,32 @@ func TestPIDLowersFanBelowAutomaticTarget(t *testing.T) {
 	}
 }
 
+func TestTrendBoostWaitsForWarmupAndUsesCooldown(t *testing.T) {
+	c := newTestController()
+	start := time.Unix(0, 0)
+	target := 65.0
+
+	for elapsed := time.Duration(0); elapsed < trendWarmupDuration; elapsed += 5 * time.Second {
+		temperature := 50.0
+		if elapsed >= 60*time.Second {
+			temperature = 52
+		}
+		trend := c.recordTrend(start.Add(elapsed), temperature, target, 40)
+		if trend.boost != 0 {
+			t.Fatalf("boost during warmup at %v = %d, want 0", elapsed, trend.boost)
+		}
+	}
+
+	trend := c.recordTrend(start.Add(trendWarmupDuration), 52, target, 40)
+	if trend.boost != trendBoostAmount {
+		t.Fatalf("boost after sustained warming = %d, want %d", trend.boost, trendBoostAmount)
+	}
+	trend = c.recordTrend(start.Add(trendWarmupDuration+5*time.Second), 52, target, 40)
+	if trend.boost != 0 {
+		t.Fatalf("boost during cooldown = %d, want 0", trend.boost)
+	}
+}
+
 func TestEMASmoothing(t *testing.T) {
 	var e emaState
 	first := e.update(0.3, 50.0)

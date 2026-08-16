@@ -20,6 +20,10 @@ func (c *Controller) appendDashboardSample(sample cycleSample) {
 		Comment:       sample.comment,
 		FanRPMMin:     sample.fanRPMMin,
 		FanRPMMax:     sample.fanRPMMax,
+		Trend30:       sample.trend30,
+		Trend60:       sample.trend60,
+		Trend90:       sample.trend90,
+		TrendBoost:    sample.trendBoost,
 	}
 
 	c.dashboard.current = point
@@ -257,7 +261,9 @@ async function refresh() {
     ' profile=' + (d.fan_profile || '-') +
     ' Kp/Ki/Kd=' + d.pid_kp + '/' + d.pid_ki + '/' + d.pid_kd +
     ' margin=' + d.margin + 'C' +
-    ' rate_boost=' + d.rate_boost;
+    ' rate_boost=' + d.rate_boost +
+    ' trend_30/60/90=' + now.trend_30.toFixed(1) + '/' + now.trend_60.toFixed(1) + '/' + now.trend_90.toFixed(1) + 'C' +
+    (now.trend_boost ? ' trend_boost=+' + now.trend_boost + '%' : '');
   document.getElementById('status').textContent = now.ts ? ('Live telemetry | latest sample ' + new Date(now.ts * 1000).toLocaleTimeString()) : 'Waiting for telemetry';
 }
 
