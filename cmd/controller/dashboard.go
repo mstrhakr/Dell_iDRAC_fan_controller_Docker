@@ -90,6 +90,8 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     .swatch.target { background:var(--target); }
     .swatch.rpm { background:var(--line3); }
     svg { width:100%; height:220px; display:block; }
+    .tooltip { position:fixed; z-index:10; display:none; min-width:190px; padding:9px 10px; color:var(--ink); background:var(--panel); border:1px solid var(--border); border-radius:6px; box-shadow:0 10px 24px rgba(0,0,0,.2); font-size:11px; line-height:1.55; pointer-events:none; }
+    .tooltip b { display:block; margin-bottom:3px; color:var(--muted); }
     .footer { margin-top:10px; color:var(--muted); font-size:13px; }
     .decision { margin-top:14px; padding:14px; display:grid; grid-template-columns:1fr auto; gap:12px; align-items:center; }
     .decision strong { display:block; margin-top:5px; font-family:Georgia, "Times New Roman", serif; font-size:19px; overflow-wrap:anywhere; }
@@ -124,6 +126,7 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
   </div>
   <div id="meta" class="footer"></div>
 </div>
+<div id="tooltip" class="tooltip"></div>
 <script>
 const root = document.documentElement;
 const storedTheme = localStorage.getItem('idrac-theme');
@@ -132,15 +135,11 @@ const themeButton = document.getElementById('themeToggle');
 function labelTheme() { themeButton.textContent = root.dataset.theme === 'dark' ? 'Light mode' : 'Dark mode'; }
 themeButton.onclick = function () { root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('idrac-theme', root.dataset.theme); labelTheme(); };
 labelTheme();
-function drawSeries(svg, series, color, yMin, yMax) {
+function drawSeries(svg, series, color, yMin, yMax, plot) {
   if (!series.length) return;
-  const width = 1000, height = 220, pad = 16;
   const span = Math.max(1, yMax - yMin);
-  const points = series.map((v, i) => {
-    const x = pad + (i * (width - 2*pad) / Math.max(1, series.length - 1));
-    const y = height - pad - ((v - yMin) / span) * (height - 2*pad);
-    return x.toFixed(1) + "," + y.toFixed(1);
-  }).join(" ");
+  const points = series.map((v, i) => !Number.isFinite(v) ? null : ((plot.left + i * plot.width / Math.max(1, series.length - 1)).toFixed(1) + "," + (plot.top + (yMax - v) / span * plot.height).toFixed(1)).filter(Boolean).join(" ");
+  if (!points) return;
   const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
   line.setAttribute("fill", "none");
   line.setAttribute("stroke", color);
@@ -149,22 +148,44 @@ function drawSeries(svg, series, color, yMin, yMax) {
   svg.appendChild(line);
 }
 
-function renderChart(svgId, sets, colors, minV, maxV, guides) {
+function renderChart(svgId, samples, sets, colors, labels, minV, maxV, guides, formatValue) {
   const svg = document.getElementById(svgId);
   while (svg.firstChild) svg.removeChild(svg.firstChild);
-  const height = 220, pad = 16, span = Math.max(1, maxV - minV);
+  const width = 1000, height = 220, plot = { left:58, top:12, width:926, height:174 }, span = Math.max(1, maxV - minV);
+  for (let tick = 0; tick <= 4; tick++) {
+    const value = minV + span * tick / 4, y = plot.top + (maxV - value) / span * plot.height;
+    const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    line.setAttribute("x1", plot.left); line.setAttribute("x2", plot.left + plot.width); line.setAttribute("y1", y); line.setAttribute("y2", y); line.setAttribute("stroke", getComputedStyle(root).getPropertyValue('--border').trim()); line.setAttribute("stroke-opacity", ".65"); svg.appendChild(line);
+    const label = document.createElementNS("http://www.w3.org/2000/svg", "text"); label.setAttribute("x", plot.left - 8); label.setAttribute("y", y + 4); label.setAttribute("fill", getComputedStyle(root).getPropertyValue('--muted').trim()); label.setAttribute("font-size", "10"); label.setAttribute("text-anchor", "end"); label.textContent = formatValue(value); svg.appendChild(label);
+  }
+  if (samples.length) {
+    [0, Math.floor((samples.length - 1) / 2), samples.length - 1].forEach((index) => {
+      const x = plot.left + index * plot.width / Math.max(1, samples.length - 1), label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      label.setAttribute("x", x); label.setAttribute("y", height - 9); label.setAttribute("fill", getComputedStyle(root).getPropertyValue('--muted').trim()); label.setAttribute("font-size", "10"); label.setAttribute("text-anchor", index === 0 ? "start" : (index === samples.length - 1 ? "end" : "middle")); label.textContent = new Date(samples[index].ts * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); svg.appendChild(label);
+    });
+  }
   (guides || []).forEach((guide) => {
     if (!Number.isFinite(guide.value)) return;
-    const y = height - pad - ((guide.value - minV) / span) * (height - 2*pad);
+    const y = plot.top + (maxV - guide.value) / span * plot.height;
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
-    line.setAttribute("x1", "16"); line.setAttribute("x2", "984"); line.setAttribute("y1", y); line.setAttribute("y2", y);
+    line.setAttribute("x1", plot.left); line.setAttribute("x2", plot.left + plot.width); line.setAttribute("y1", y); line.setAttribute("y2", y);
     line.setAttribute("stroke", guide.color); line.setAttribute("stroke-width", "1.5"); line.setAttribute("stroke-dasharray", "5 5");
     svg.appendChild(line);
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", "980"); label.setAttribute("y", y - 4); label.setAttribute("fill", guide.color); label.setAttribute("font-size", "11"); label.setAttribute("text-anchor", "end"); label.textContent = guide.label;
+    label.setAttribute("x", plot.left + plot.width); label.setAttribute("y", y - 4); label.setAttribute("fill", guide.color); label.setAttribute("font-size", "11"); label.setAttribute("text-anchor", "end"); label.textContent = guide.label;
     svg.appendChild(label);
   });
-  sets.forEach((s, i) => drawSeries(svg, s, colors[i], minV, maxV));
+  sets.forEach((s, i) => drawSeries(svg, s, colors[i], minV, maxV, plot));
+  const cursor = document.createElementNS("http://www.w3.org/2000/svg", "line"); cursor.setAttribute("stroke", getComputedStyle(root).getPropertyValue('--muted').trim()); cursor.setAttribute("stroke-dasharray", "3 3"); cursor.style.display = "none"; svg.appendChild(cursor);
+  const tooltip = document.getElementById('tooltip');
+  svg.onmouseleave = () => { cursor.style.display = 'none'; tooltip.style.display = 'none'; };
+  svg.onmousemove = (event) => {
+    if (!samples.length) return;
+    const rect = svg.getBoundingClientRect(), x = (event.clientX - rect.left) * width / rect.width;
+    const index = Math.max(0, Math.min(samples.length - 1, Math.round((x - plot.left) / plot.width * Math.max(1, samples.length - 1))));
+    const cursorX = plot.left + index * plot.width / Math.max(1, samples.length - 1); cursor.setAttribute('x1', cursorX); cursor.setAttribute('x2', cursorX); cursor.setAttribute('y1', plot.top); cursor.setAttribute('y2', plot.top + plot.height); cursor.style.display = 'block';
+    const sample = samples[index]; tooltip.innerHTML = '<b>' + new Date(sample.ts * 1000).toLocaleString() + '</b>' + sets.map((values, i) => labels[i] + ': ' + (Number.isFinite(values[index]) ? formatValue(values[index]) : '—')).join('<br>'); tooltip.style.left = Math.min(event.clientX + 14, window.innerWidth - 210) + 'px'; tooltip.style.top = Math.min(event.clientY + 14, window.innerHeight - 110) + 'px'; tooltip.style.display = 'block';
+  };
 }
 
 function rangeLabel(values, suffix) {
@@ -188,11 +209,16 @@ async function refresh() {
 
   const h = Array.isArray(d.history) ? d.history : [];
   document.getElementById('samples').textContent = h.length;
-  const raw = h.map(p => p.raw).filter(v => Number.isFinite(v));
-  const ema = h.map(p => p.ema).filter(v => Number.isFinite(v));
-  const fan = h.map(p => p.fan).filter(v => Number.isFinite(v) && v >= 0);
-  const rpmMin = h.map(p => p.fan_rpm_min).filter(v => Number.isFinite(v));
-  const rpmMax = h.map(p => p.fan_rpm_max).filter(v => Number.isFinite(v));
+  const rawSeries = h.map(p => Number.isFinite(p.raw) ? p.raw : null);
+  const emaSeries = h.map(p => Number.isFinite(p.ema) ? p.ema : null);
+  const fanSeries = h.map(p => Number.isFinite(p.fan) && p.fan >= 0 ? p.fan : null);
+  const rpmMinSeries = h.map(p => Number.isFinite(p.fan_rpm_min) ? p.fan_rpm_min : null);
+  const rpmMaxSeries = h.map(p => Number.isFinite(p.fan_rpm_max) ? p.fan_rpm_max : null);
+  const raw = rawSeries.filter(Number.isFinite);
+  const ema = emaSeries.filter(Number.isFinite);
+  const fan = fanSeries.filter(Number.isFinite);
+  const rpmMin = rpmMinSeries.filter(Number.isFinite);
+  const rpmMax = rpmMaxSeries.filter(Number.isFinite);
   const currentRPMMin = now.fan_rpm_min, currentRPMMax = now.fan_rpm_max;
   document.getElementById('rpm').textContent = Number.isFinite(currentRPMMin) && Number.isFinite(currentRPMMax) ? (currentRPMMin + '–' + currentRPMMax + ' RPM') : '-';
   document.getElementById('rpmDetail').textContent = Number.isFinite(currentRPMMin) ? 'Lowest–highest reported fan RPM' : 'No fan RPM sensor reported yet';
@@ -200,11 +226,11 @@ async function refresh() {
   const tempMin = Math.min(...raw, ...ema, 20);
   const tempMax = Math.max(...raw, ...ema, 100);
   const lower = tempMin - 2, upper = tempMax + 2;
-  renderChart('tempChart', [raw, ema], ['#006d77', '#e76f51'], lower, upper, [{ value:d.target_temperature, label:'target ' + d.target_temperature + 'C', color:'#bc7c14' }, { value:d.threshold_temperature, label:'threshold ' + d.threshold_temperature + 'C', color:'#dc6045' }]);
-  renderChart('fanChart', [fan], ['#2a9d8f'], 0, 100);
+  renderChart('tempChart', h, [rawSeries, emaSeries], ['#006d77', '#e76f51'], ['Raw IPMI', 'EMA'], lower, upper, [{ value:d.target_temperature, label:'target ' + d.target_temperature + 'C', color:'#bc7c14' }, { value:d.threshold_temperature, label:'threshold ' + d.threshold_temperature + 'C', color:'#dc6045' }], value => value.toFixed(1) + 'C');
+  renderChart('fanChart', h, [fanSeries], ['#2a9d8f'], ['Requested duty cycle'], 0, 100, [], value => Math.round(value) + '%');
   const rpmFloor = Math.max(0, Math.min(...rpmMin, ...rpmMax, 0) - 200);
   const rpmCeiling = Math.max(...rpmMin, ...rpmMax, 1000) + 200;
-  renderChart('rpmChart', [rpmMin, rpmMax], ['#087e8b', '#249e91'], rpmFloor, rpmCeiling);
+  renderChart('rpmChart', h, [rpmMinSeries, rpmMaxSeries], ['#087e8b', '#249e91'], ['Lowest fan', 'Highest fan'], rpmFloor, rpmCeiling, [], value => Math.round(value) + ' RPM');
   document.getElementById('tempSummary').textContent = 'Raw ' + rangeLabel(raw, 'C') + ' | EMA ' + rangeLabel(ema, 'C');
   document.getElementById('fanSummary').textContent = 'Requested range ' + rangeLabel(fan, '%');
   document.getElementById('rpmSummary').textContent = rpmMin.length ? ('Measured range ' + Math.min(...rpmMin) + '–' + Math.max(...rpmMax) + ' RPM') : 'RPM is refreshed at the log interval';
