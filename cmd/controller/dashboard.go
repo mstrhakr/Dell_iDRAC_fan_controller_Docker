@@ -150,7 +150,7 @@ labelTheme();
 function drawSeries(svg, series, color, yMin, yMax, plot) {
   if (!series.length) return;
   const span = Math.max(1, yMax - yMin);
-  const points = series.map((v, i) => !Number.isFinite(v) ? null : ((plot.left + i * plot.width / Math.max(1, series.length - 1)).toFixed(1) + "," + (plot.top + (yMax - v) / span * plot.height).toFixed(1)).filter(Boolean).join(" ");
+  const points = series.map((v, i) => !Number.isFinite(v) ? null : ((plot.left + i * plot.width / Math.max(1, series.length - 1)).toFixed(1) + "," + (plot.top + (yMax - v) / span * plot.height).toFixed(1))).filter(Boolean).join(" ");
   if (!points) return;
   const line = document.createElementNS("http://www.w3.org/2000/svg", "polyline");
   line.setAttribute("fill", "none");
