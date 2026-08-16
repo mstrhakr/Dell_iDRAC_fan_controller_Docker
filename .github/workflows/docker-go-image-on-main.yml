@@ -5,7 +5,7 @@ name: Build and Publish Go Docker Image
 
 on:
   push:
-    branches: [main]
+    branches: [master]
 
 permissions:
   contents: read
@@ -37,7 +37,7 @@ jobs:
         with:
           images: ghcr.io/${{ github.repository_owner }}/dell-idrac-fan-controller
           tags: |
-            type=raw,value=main
+            type=raw,value=master
             type=sha,prefix=sha-
 
       - name: Build and push
