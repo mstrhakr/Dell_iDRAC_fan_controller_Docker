@@ -9,6 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
+  actions: write
   contents: read
   packages: write
 
@@ -46,6 +47,8 @@ jobs:
           context: .
           platforms: linux/amd64,linux/arm64
           push: true
+          cache-from: type=gha,scope=dell-idrac-fan-controller
+          cache-to: type=gha,mode=max,scope=dell-idrac-fan-controller
           tags: |
             ghcr.io/${{ github.repository_owner }}/dell-idrac-fan-controller:latest
             ghcr.io/${{ github.repository_owner }}/dell-idrac-fan-controller:sha-${{ github.sha }}
