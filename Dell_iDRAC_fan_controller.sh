@@ -49,6 +49,8 @@ PID_GAIN_PROPORTIONAL="${PID_GAIN_PROPORTIONAL:-$PID_GAIN_PROPORTIONAL_DEFAULT}"
 PID_GAIN_INTEGRAL="${PID_GAIN_INTEGRAL:-$PID_GAIN_INTEGRAL_DEFAULT}"
 PID_GAIN_DERIVATIVE="${PID_GAIN_DERIVATIVE:-$PID_GAIN_DERIVATIVE_DEFAULT}"
 AUTO_MODE_TEMPERATURE_MARGIN="${AUTO_MODE_TEMPERATURE_MARGIN:-$AUTO_MODE_TEMPERATURE_MARGIN_DEFAULT}"
+GPU_TEMPERATURE_SOURCE="${GPU_TEMPERATURE_SOURCE:-$GPU_TEMPERATURE_SOURCE_DEFAULT}"
+GPU_TEMPERATURE_THRESHOLD="${GPU_TEMPERATURE_THRESHOLD:-$GPU_TEMPERATURE_THRESHOLD_DEFAULT}"
 
 # When AUTO_MODE is enabled, FAN_SPEED should not be used
 if "$AUTO_MODE"; then
@@ -109,6 +111,9 @@ fi
 # (see https://github.com/tigerblue77/Dell_iDRAC_fan_controller_Docker/issues/216)
 resolve_CPU_temperature_source "$CPU_TEMPERATURE_SOURCE" "$NETWORK_MODE"
 readonly CPU_TEMPERATURE_SOURCE
+
+resolve_GPU_temperature_source "$GPU_TEMPERATURE_SOURCE"
+readonly GPU_TEMPERATURE_SOURCE
 
 # Resolve the CPU temperature threshold. "auto" (the default) asks the CPUs themselves, through lm-sensors,
 # for the "high" temperature defined by their manufacturer : that value describes the actual hardware being
@@ -171,6 +176,15 @@ else
 fi
 readonly CPU_TEMPERATURE_THRESHOLD
 
+if [[ ! "$GPU_TEMPERATURE_THRESHOLD" =~ ^[0-9]{1,3}$ ]]; then
+  print_configuration_error_and_exit "GPU_TEMPERATURE_THRESHOLD" "$GPU_TEMPERATURE_THRESHOLD" "a positive integer number of degrees Celsius"
+fi
+GPU_TEMPERATURE_THRESHOLD=$((10#$GPU_TEMPERATURE_THRESHOLD))
+if [ "$GPU_TEMPERATURE_THRESHOLD" -lt "$MINIMUM_PLAUSIBLE_CPU_TEMPERATURE_THRESHOLD" ] || [ "$GPU_TEMPERATURE_THRESHOLD" -gt "$MAXIMUM_PLAUSIBLE_CPU_TEMPERATURE_THRESHOLD" ]; then
+  print_configuration_error_and_exit "GPU_TEMPERATURE_THRESHOLD" "$GPU_TEMPERATURE_THRESHOLD" "a temperature in degrees Celsius between ${MINIMUM_PLAUSIBLE_CPU_TEMPERATURE_THRESHOLD} and ${MAXIMUM_PLAUSIBLE_CPU_TEMPERATURE_THRESHOLD}"
+fi
+readonly GPU_TEMPERATURE_THRESHOLD
+
 set_iDRAC_login_string "$IDRAC_HOST" "$IDRAC_USERNAME" "$IDRAC_PASSWORD"
 
 get_Dell_server_model
@@ -202,6 +216,8 @@ else
 fi
 echo "CPU temperature threshold: ${CPU_TEMPERATURE_THRESHOLD}°C${CPU_TEMPERATURE_THRESHOLD_SOURCE}"
 echo "CPU temperature source: $CPU_TEMPERATURE_SOURCE_DESCRIPTION"
+echo "GPU temperature source: $GPU_TEMPERATURE_SOURCE_DESCRIPTION"
+echo "GPU temperature threshold: ${GPU_TEMPERATURE_THRESHOLD}°C"
 # The unit is only appended when the value doesn't already carry one, "90s" and "5m" being accepted
 # forms that would otherwise be logged as "90ss" and "5ms"
 if [[ "$CHECK_INTERVAL" =~ ^[0-9]+$ ]]; then
@@ -528,10 +544,32 @@ while true; do
       fi
     done
 
-    # If we have a valid temperature reading, calculate PID fan speed
+    # Select the thermal input that is farthest above its own threshold.
+    CONTROL_TEMPERATURE=""
+    CONTROL_THRESHOLD=""
+    CONTROL_SENSOR_LABEL=""
+    CPU_DELTA=-9999
     if [ "$MAX_CPU_INDEX" -ge 0 ]; then
+      CPU_DELTA=$((MAX_CPU_TEMP - CPU_TEMPERATURE_THRESHOLD))
+      CONTROL_TEMPERATURE=$MAX_CPU_TEMP
+      CONTROL_THRESHOLD=$CPU_TEMPERATURE_THRESHOLD
+      CONTROL_SENSOR_LABEL="${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]}"
+    fi
+
+    if is_temperature_reading_valid "$CURRENT_GPU_TEMPERATURE"; then
+      GPU_DELTA=$((CURRENT_GPU_TEMPERATURE - GPU_TEMPERATURE_THRESHOLD))
+      if [ "$CONTROL_SENSOR_LABEL" == "" ] || [ "$GPU_DELTA" -gt "$CPU_DELTA" ]; then
+        CONTROL_TEMPERATURE=$CURRENT_GPU_TEMPERATURE
+        CONTROL_THRESHOLD=$GPU_TEMPERATURE_THRESHOLD
+        CONTROL_SENSOR_LABEL="GPU"
+      fi
+    fi
+
+    # If we have a valid control reading, calculate PID fan speed
+    if [ "$CONTROL_SENSOR_LABEL" != "" ]; then
+      PREVIOUS_FAN_SPEED=$DECIMAL_FAN_SPEED
       NEW_FAN_SPEED=0
-      NEW_FAN_SPEED=$(calculate_PID_fan_speed "$MAX_CPU_TEMP" "$CPU_TEMPERATURE_THRESHOLD" "$PID_GAIN_PROPORTIONAL" "$PID_GAIN_INTEGRAL" "$PID_GAIN_DERIVATIVE")
+      NEW_FAN_SPEED=$(calculate_PID_fan_speed "$CONTROL_TEMPERATURE" "$CONTROL_THRESHOLD" "$PID_GAIN_PROPORTIONAL" "$PID_GAIN_INTEGRAL" "$PID_GAIN_DERIVATIVE")
       
       DECIMAL_FAN_SPEED=$NEW_FAN_SPEED
       HEXADECIMAL_FAN_SPEED=$(convert_decimal_value_to_hexadecimal "$DECIMAL_FAN_SPEED")
@@ -539,21 +577,23 @@ while true; do
       apply_PID_fan_control_profile
       
       # Log comment about PID adjustment
-      if [ "$MAX_CPU_TEMP" -gt "$CPU_TEMPERATURE_THRESHOLD" ]; then
-        COMMENT="Overtemp: ${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]} at $MAX_CPU_TEMP°C, PID increasing fan to $DECIMAL_FAN_SPEED%"
-      elif [ "$MAX_CPU_TEMP" -lt $((CPU_TEMPERATURE_THRESHOLD - AUTO_MODE_TEMPERATURE_MARGIN)) ]; then
-        COMMENT="Cool: ${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]} at $MAX_CPU_TEMP°C, PID lowered fan to $DECIMAL_FAN_SPEED%"
+      if [ "$CONTROL_TEMPERATURE" -gt "$CONTROL_THRESHOLD" ]; then
+        COMMENT="Overtemp: $CONTROL_SENSOR_LABEL at ${CONTROL_TEMPERATURE}°C, PID increased fan to $DECIMAL_FAN_SPEED%"
+      elif [ "$DECIMAL_FAN_SPEED" -gt "$PREVIOUS_FAN_SPEED" ]; then
+        COMMENT="Stabilizing: $CONTROL_SENSOR_LABEL at ${CONTROL_TEMPERATURE}°C, PID raised fan to $DECIMAL_FAN_SPEED%"
+      elif [ "$DECIMAL_FAN_SPEED" -lt "$PREVIOUS_FAN_SPEED" ]; then
+        COMMENT="Cool: $CONTROL_SENSOR_LABEL at ${CONTROL_TEMPERATURE}°C, PID lowered fan to $DECIMAL_FAN_SPEED%"
       else
-        COMMENT="Optimal: ${DETECTED_CPU_LABELS[$MAX_CPU_INDEX]} at $MAX_CPU_TEMP°C, PID maintaining $DECIMAL_FAN_SPEED%"
+        COMMENT="Optimal: $CONTROL_SENSOR_LABEL at ${CONTROL_TEMPERATURE}°C, PID maintaining $DECIMAL_FAN_SPEED%"
       fi
     else
-      # No valid temperature, apply Dell default for safety
+      # No valid control reading, apply Dell default for safety
       apply_Dell_default_fan_control_profile
-      COMMENT="No valid CPU temperature could be read, $(fan_control_comment_clause "Dell default dynamic fan control profile applied for safety")"
+      COMMENT="No valid CPU or GPU temperature could be read, $(fan_control_comment_clause "Dell default dynamic fan control profile applied for safety")"
     fi
   
   # Original logic for non-AUTO_MODE
-  elif is_any_CPU_overheating; then
+  elif is_any_CPU_overheating || is_GPU_overheating; then
     apply_Dell_default_fan_control_profile
 
     if ! $IS_DELL_DEFAULT_FAN_CONTROL_PROFILE_APPLIED || $IS_FIRST_MONITORING_CYCLE; then
@@ -561,7 +601,9 @@ while true; do
 
       # is_any_CPU_overheating() collected every CPU concerned, however many of them there are, each
       # with its reading so the comment can tell "too high" from "could not be read"
-      if (( ${#OVERHEATING_CPUS_AND_TEMPERATURES[@]} > 0 )); then
+      if is_GPU_overheating; then
+        COMMENT="GPU temperature (${CURRENT_GPU_TEMPERATURE}°C) is above threshold (${GPU_TEMPERATURE_THRESHOLD}°C), $(fan_control_comment_clause "Dell default dynamic fan control profile applied for safety")"
+      elif (( ${#OVERHEATING_CPUS_AND_TEMPERATURES[@]} > 0 )); then
         COMMENT=$(build_fan_control_fallback_comment "${OVERHEATING_CPUS_AND_TEMPERATURES[@]}")
       else
         COMMENT="No CPU temperature could be read, $(fan_control_comment_clause "Dell default dynamic fan control profile applied for safety")"

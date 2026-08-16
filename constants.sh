@@ -88,6 +88,12 @@ readonly AUTO_MODE_FAN_SPEED_MAX=100
 # Prevents aggressive lowering when close to the limit
 readonly AUTO_MODE_TEMPERATURE_MARGIN_DEFAULT=3
 
+# Optional GPU telemetry settings. Disabled by default to preserve existing behavior.
+# When enabled (GPU_TEMPERATURE_SOURCE=nvidia-smi), the controller can use a local GPU
+# temperature as an additional thermal input while still driving fans through iDRAC/IPMI.
+readonly GPU_TEMPERATURE_SOURCE_DEFAULT="disabled"
+readonly GPU_TEMPERATURE_THRESHOLD_DEFAULT=80
+
 # Integral anti-windup limit: prevents integral term from growing unbounded during steady state
 # Expressed as a percentage of (THRESHOLD - current_temp)
 readonly PID_INTEGRAL_WINDUP_LIMIT=50

@@ -11,6 +11,9 @@ PID_PREVIOUS_ERROR=0
 PID_INTEGRAL_SUM=0
 PID_CURRENT_FAN_SPEED=0
 PID_MODE=false
+GPU_TEMPERATURE_SOURCE_IN_USE="disabled"
+GPU_TEMPERATURE_SOURCE_DESCRIPTION="Disabled"
+CURRENT_GPU_TEMPERATURE=""
 
 # Define global functions
 
@@ -26,12 +29,13 @@ function initialize_PID_mode() {
   PID_PREVIOUS_ERROR=0
   PID_INTEGRAL_SUM=0
   PID_CURRENT_FAN_SPEED=$((AUTO_MODE_FAN_SPEED_MIN + (AUTO_MODE_FAN_SPEED_MAX - AUTO_MODE_FAN_SPEED_MIN) / 2))
+  DECIMAL_FAN_SPEED=$PID_CURRENT_FAN_SPEED
   
   printf "PID Auto Mode initialized with fan speed range %d%% - %d%%, temperature margin: %d°C\n" \
     "$AUTO_MODE_FAN_SPEED_MIN" "$AUTO_MODE_FAN_SPEED_MAX" "$AUTO_MODE_TEMPERATURE_MARGIN"
 }
 
-# Calculate PID control output based on CPU temperature error
+# Calculate PID control output based on temperature error.
 # Usage : calculate_PID_fan_speed $CURRENT_TEMP $TARGET_THRESHOLD $Kp $Ki $Kd
 # Returns : new fan speed as a percentage (0-100)
 function calculate_PID_fan_speed() {
@@ -41,62 +45,30 @@ function calculate_PID_fan_speed() {
   local -r KI=$4
   local -r KD=$5
 
-  # Calculate error (negative means we're below threshold, which is good)
-  # error = target - current, so positive error means we're too hot
-  local -i ERROR=$((TARGET_THRESHOLD - CURRENT_TEMP))
+  # Positive error means "too hot" and asks for more airflow.
+  local -i ERROR=$((CURRENT_TEMP - TARGET_THRESHOLD))
 
-  # Proportional term: proportional to current error (multiply by 10 for precision)
-  # P = Kp * error
-  local -i PROPORTIONAL_TERM=$((ERROR * ${KP%.*}))
-  
-  # Add fractional part of Kp if it exists
-  if [[ "$KP" == *"."* ]]; then
-    local FRAC=${KP#*.}
-    PROPORTIONAL_TERM=$(( PROPORTIONAL_TERM + (ERROR * ${FRAC:0:1} / 10) ))
+  # Integral term: accumulate error over time, bounded to prevent wind-up.
+  PID_INTEGRAL_SUM=$((PID_INTEGRAL_SUM + ERROR))
+  if [ "$PID_INTEGRAL_SUM" -gt "$PID_INTEGRAL_WINDUP_LIMIT" ]; then
+    PID_INTEGRAL_SUM=$PID_INTEGRAL_WINDUP_LIMIT
+  elif [ "$PID_INTEGRAL_SUM" -lt "-$PID_INTEGRAL_WINDUP_LIMIT" ]; then
+    PID_INTEGRAL_SUM=-$PID_INTEGRAL_WINDUP_LIMIT
   fi
 
-  # Integral term: sum of all past errors to eliminate steady-state error
-  # Only accumulate when there's an error to avoid windup
-  if [ "$ERROR" -ne 0 ]; then
-    PID_INTEGRAL_SUM=$((PID_INTEGRAL_SUM + ERROR))
-    
-    # Anti-windup: limit integral term to prevent unbounded growth
-    local -i INTEGRAL_LIMIT=$((TARGET_THRESHOLD * 2))
-    
-    # Clamp integral sum
-    if [ "$PID_INTEGRAL_SUM" -gt "$INTEGRAL_LIMIT" ]; then
-      PID_INTEGRAL_SUM=$INTEGRAL_LIMIT
-    elif [ "$PID_INTEGRAL_SUM" -lt "-$INTEGRAL_LIMIT" ]; then
-      PID_INTEGRAL_SUM=-$INTEGRAL_LIMIT
-    fi
-  fi
-  
-  # I = Ki * integral_sum
-  local -i INTEGRAL_TERM=$((PID_INTEGRAL_SUM * ${KI%.*} / 10))
-  
-  # Add fractional part of Ki if it exists
-  if [[ "$KI" == *"."* ]]; then
-    local FRAC=${KI#*.}
-    INTEGRAL_TERM=$(( INTEGRAL_TERM + (PID_INTEGRAL_SUM * ${FRAC:0:1} / 100) ))
-  fi
-
-  # Derivative term: rate of change of error to predict overshoot
+  # Derivative term: react to how quickly the error changes.
   local -i ERROR_RATE=$((ERROR - PID_PREVIOUS_ERROR))
-  local -i DERIVATIVE_TERM=$((ERROR_RATE * ${KD%.*}))
-  
-  # Add fractional part of Kd if it exists
-  if [[ "$KD" == *"."* ]]; then
-    local FRAC=${KD#*.}
-    DERIVATIVE_TERM=$(( DERIVATIVE_TERM + (ERROR_RATE * ${FRAC:0:1} / 10) ))
+
+  # Use awk for gain multiplication so decimal gains stay usable.
+  local -i PID_DELTA
+  PID_DELTA=$(awk -v e="$ERROR" -v i="$PID_INTEGRAL_SUM" -v d="$ERROR_RATE" -v kp="$KP" -v ki="$KI" -v kd="$KD" 'BEGIN { printf "%.0f", (e * kp) + (i * ki) + (d * kd) }')
+
+  local -i ADJUSTED_SPEED=$((PID_CURRENT_FAN_SPEED + PID_DELTA))
+
+  # Near the threshold, avoid lowering fan speed: only cool down aggressively once there is margin.
+  if (( ERROR > -AUTO_MODE_TEMPERATURE_MARGIN )) && (( ADJUSTED_SPEED < PID_CURRENT_FAN_SPEED )); then
+    ADJUSTED_SPEED=$PID_CURRENT_FAN_SPEED
   fi
-
-  # Calculate total PID output
-  local -i PID_OUTPUT=$((PROPORTIONAL_TERM + INTEGRAL_TERM + DERIVATIVE_TERM))
-
-  # Convert to percentage based on baseline (starting fan speed)
-  local -i PID_BASE_SPEED=$((AUTO_MODE_FAN_SPEED_MIN + (AUTO_MODE_FAN_SPEED_MAX - AUTO_MODE_FAN_SPEED_MIN) / 2))
-  
-  local -i ADJUSTED_SPEED=$((PID_BASE_SPEED + PID_OUTPUT))
 
   # Clamp to min/max bounds
   if (( ADJUSTED_SPEED < AUTO_MODE_FAN_SPEED_MIN )); then
@@ -107,8 +79,84 @@ function calculate_PID_fan_speed() {
 
   # Store previous error for next cycle's derivative calculation
   PID_PREVIOUS_ERROR=$ERROR
+  PID_CURRENT_FAN_SPEED=$ADJUSTED_SPEED
 
   echo "$ADJUSTED_SPEED"
+}
+
+# Normalize GPU_TEMPERATURE_SOURCE into either "disabled" or "nvidia-smi"
+# Usage : normalize_GPU_temperature_source "$GPU_TEMPERATURE_SOURCE"
+function normalize_GPU_temperature_source() {
+  local VALUE="$1"
+
+  VALUE="${VALUE//[[:space:]]/}"
+  VALUE="${VALUE#[\"\']}"
+  VALUE="${VALUE%[\"\']}"
+  VALUE="${VALUE,,}"
+  VALUE="${VALUE:-disabled}"
+
+  case "$VALUE" in
+    nvidia | nvidia_smi) VALUE="nvidia-smi" ;;
+  esac
+
+  printf '%s' "$VALUE"
+}
+
+# Resolve the GPU temperature source and describe what will be used.
+# Usage : resolve_GPU_temperature_source "$GPU_TEMPERATURE_SOURCE"
+function resolve_GPU_temperature_source() {
+  local -r REQUESTED_SOURCE="$1"
+
+  GPU_TEMPERATURE_SOURCE_IN_USE=$(normalize_GPU_temperature_source "$REQUESTED_SOURCE")
+  case "$GPU_TEMPERATURE_SOURCE_IN_USE" in
+    disabled)
+      GPU_TEMPERATURE_SOURCE_DESCRIPTION="Disabled"
+      ;;
+    nvidia-smi)
+      if command -v nvidia-smi > /dev/null 2>&1; then
+        GPU_TEMPERATURE_SOURCE_DESCRIPTION="nvidia-smi"
+      else
+        GPU_TEMPERATURE_SOURCE_IN_USE="disabled"
+        GPU_TEMPERATURE_SOURCE_DESCRIPTION="Disabled (nvidia-smi is unavailable in this container)"
+        print_warning "GPU_TEMPERATURE_SOURCE is set to nvidia-smi but nvidia-smi is not available in the container, GPU temperature supervision is disabled"
+      fi
+      ;;
+    *)
+      print_configuration_error_and_exit "GPU_TEMPERATURE_SOURCE" "$REQUESTED_SOURCE" "exactly \"disabled\" or \"nvidia-smi\""
+      ;;
+  esac
+}
+
+# Read the highest GPU temperature reported by nvidia-smi, if any.
+# Usage : retrieve_GPU_temperature_from_nvidia_smi
+function retrieve_GPU_temperature_from_nvidia_smi() {
+  if ! command -v nvidia-smi > /dev/null 2>&1; then
+    return
+  fi
+
+  nvidia-smi --query-gpu=temperature.gpu --format=csv,noheader,nounits 2>/dev/null | awk '
+    /^[0-9]+$/ {
+      if (max == "" || $1 > max) max = $1
+    }
+    END {
+      if (max != "") print max
+    }'
+}
+
+# Read the current GPU temperature from whichever source is configured.
+# Usage : retrieve_GPU_temperature
+function retrieve_GPU_temperature() {
+  case "${GPU_TEMPERATURE_SOURCE_IN_USE:-disabled}" in
+    nvidia-smi)
+      retrieve_GPU_temperature_from_nvidia_smi
+      ;;
+  esac
+}
+
+# Whether the current GPU reading is above its configured threshold.
+# Usage : is_GPU_overheating
+function is_GPU_overheating() {
+  is_temperature_reading_valid "$CURRENT_GPU_TEMPERATURE" && [ "$CURRENT_GPU_TEMPERATURE" -gt "$GPU_TEMPERATURE_THRESHOLD" ]
 }
 
 
@@ -1426,6 +1474,9 @@ function retrieve_temperatures() {
   # value as the "-" placeholder, so a server that genuinely has no exhaust sensor still shows the
   # same column it did before, on every line
   EXHAUST_TEMPERATURE=$(retrieve_temperature_by_sensor_name "$DATA" "Exhaust")
+
+  # Read optional local GPU telemetry (e.g. nvidia-smi) independently from IPMI.
+  CURRENT_GPU_TEMPERATURE=$(retrieve_GPU_temperature)
 }
 
 # Report the target server's power state
