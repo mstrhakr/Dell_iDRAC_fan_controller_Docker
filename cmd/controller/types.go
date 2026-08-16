@@ -14,6 +14,9 @@ type Config struct {
 	LocalIPMIDevice  string
 	FanSpeed         int
 	CheckInterval    time.Duration
+	ApplyInterval    time.Duration // When to apply PID commands
+	LogInterval      time.Duration // When to log aggregated stats
+	IPMILatency      time.Duration // Measured at startup
 
 	// Threshold / target
 	CPUTemperatureThreshold int

@@ -35,7 +35,15 @@ func (c *Controller) run() error {
 		fmt.Printf("IPMI device          : %s (local)\n", c.cfg.LocalIPMIDevice)
 	}
 	fmt.Printf("iDRAC firmware       : %s\n", fw)
+	fmt.Println()
+
+	// Auto-calculate intervals if CHECK_INTERVAL wasn't explicitly set
+	if err := c.setupAutoIntervals(); err != nil {
+		return fmt.Errorf("failed to auto-calculate intervals: %w", err)
+	}
+
 	c.logStartup()
+
 
 	for {
 		start := time.Now()

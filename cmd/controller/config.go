@@ -17,7 +17,9 @@ func loadConfig() (Config, error) {
 		IDRACHost:                        envOrDefault("IDRAC_HOST", "local"),
 		IDRACUsername:                    os.Getenv("IDRAC_USERNAME"),
 		IDRACPassword:                    os.Getenv("IDRAC_PASSWORD"),
-		CheckInterval:                    5 * time.Second,
+		CheckInterval:                    0, // Will be auto-calculated
+		ApplyInterval:                    0, // Will be auto-calculated
+		LogInterval:                      0, // Will be auto-calculated
 		MaximumIPMIUnreachableDuration:   60 * time.Second,
 		DisableThirdPartyPCIeCooling:     false,
 		KeepThirdPartyCoolingStateOnExit: false,
@@ -133,15 +135,34 @@ func loadConfig() (Config, error) {
 		}
 	}
 
-	// Check interval
-	cfg.CheckInterval, err = parseInterval(envOrDefault("CHECK_INTERVAL", "5"))
-	if err != nil {
-		return cfg, fmt.Errorf("CHECK_INTERVAL: %w", err)
+	// Check interval (optional override for testing; otherwise auto-calculated)
+	checkIntervalEnv := strings.TrimSpace(os.Getenv("CHECK_INTERVAL"))
+	if checkIntervalEnv != "" {
+		checkInterval, err := parseInterval(checkIntervalEnv)
+		if err != nil {
+			return cfg, fmt.Errorf("CHECK_INTERVAL: %w", err)
+		}
+		if checkInterval <= 0 {
+			return cfg, errors.New("CHECK_INTERVAL must be greater than zero")
+		}
+		cfg.CheckInterval = checkInterval
 	}
-	if cfg.CheckInterval <= 0 {
-		return cfg, errors.New("CHECK_INTERVAL must be greater than zero")
+
+	// Log interval (optional user override; otherwise auto-calculated as 5× CHECK_INTERVAL)
+	logIntervalEnv := strings.TrimSpace(os.Getenv("LOG_INTERVAL"))
+	if logIntervalEnv != "" {
+		logInterval, err := parseInterval(logIntervalEnv)
+		if err != nil {
+			return cfg, fmt.Errorf("LOG_INTERVAL: %w", err)
+		}
+		if logInterval <= 0 {
+			return cfg, errors.New("LOG_INTERVAL must be greater than zero")
+		}
+		cfg.LogInterval = logInterval
 	}
-	if cfg.NetworkMode && cfg.CheckInterval > 15*time.Minute {
+
+	// Network mode cap for CHECK_INTERVAL
+	if cfg.NetworkMode && cfg.CheckInterval > 0 && cfg.CheckInterval > 15*time.Minute {
 		return cfg, errors.New("CHECK_INTERVAL must be at most 15 minutes in network mode")
 	}
 
@@ -267,7 +288,9 @@ func newController(cfg Config) *Controller {
 		initial = float64(cfg.AutoModeFanSpeedMin + (cfg.AutoModeFanSpeedMax-cfg.AutoModeFanSpeedMin)/2)
 	}
 	allowed := 0
-	if cfg.MaximumIPMIUnreachableDuration > 0 && cfg.CheckInterval > 0 {
+	// CheckInterval must be known to calculate failures allowed
+	// If still 0 at this point, it will be calculated later
+	if cfg.CheckInterval > 0 && cfg.MaximumIPMIUnreachableDuration > 0 {
 		allowed = int(math.Ceil(float64(cfg.MaximumIPMIUnreachableDuration) / float64(cfg.CheckInterval)))
 		if allowed < 1 {
 			allowed = 1

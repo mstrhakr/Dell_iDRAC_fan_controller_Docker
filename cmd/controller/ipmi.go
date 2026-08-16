@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // detectLocalIPMIDevice finds and returns the path to the local IPMI device.
@@ -23,6 +25,137 @@ func detectLocalIPMIDevice() (string, error) {
 			"  Alternatively, set IDRAC_HOST to your iDRAC IP address to use network mode.",
 		strings.Join(ipmiDevicePaths, " or "),
 	)
+}
+
+// measureIPMILatency samples IPMI round-trip time over N attempts.
+func (c *Controller) measureIPMILatency(samples int) (time.Duration, error) {
+	var latencies []time.Duration
+	for i := 0; i < samples; i++ {
+		start := time.Now()
+		_, err := c.runIPMI("sdr", "type", "temperature")
+		elapsed := time.Since(start)
+		if err != nil {
+			return 0, fmt.Errorf("failed to measure IPMI latency (sample %d): %w", i+1, err)
+		}
+		latencies = append(latencies, elapsed)
+	}
+
+	// Calculate average latency
+	var totalLatency time.Duration
+	for _, l := range latencies {
+		totalLatency += l
+	}
+	avgLatency := totalLatency / time.Duration(len(latencies))
+	return avgLatency, nil
+}
+
+// detectBMCRefreshRate rapid-polls the BMC for sensor changes to detect refresh rate.
+// Returns the interval at which the BMC updates sensor readings.
+func (c *Controller) detectBMCRefreshRate(timeout time.Duration) (time.Duration, error) {
+	var firstReading *int
+	defaultRefreshRate := 5 * time.Second
+	pollStart := time.Now()
+
+	for time.Since(pollStart) < timeout {
+		snap, err := c.readTemperatures()
+		if err != nil {
+			return defaultRefreshRate, fmt.Errorf("failed to read temperatures during BMC detection: %w", err)
+		}
+
+		rawMax, _, hasReading := maxTemp(snap.cpuTemps)
+		if !hasReading {
+			time.Sleep(100 * time.Millisecond)
+			continue
+		}
+
+		if firstReading == nil {
+			firstReading = &rawMax
+		} else if rawMax != *firstReading {
+			// Value changed, so we detected a refresh
+			refreshRate := time.Since(pollStart)
+			return refreshRate, nil
+		}
+
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	// Timeout reached; return default
+	return defaultRefreshRate, nil
+}
+
+// setupAutoIntervals measures IPMI latency and BMC refresh rate, then auto-calculates all intervals.
+func (c *Controller) setupAutoIntervals() error {
+	fmt.Println("Auto-calculating intervals...")
+
+	// Only measure if CHECK_INTERVAL wasn't explicitly set
+	if c.cfg.CheckInterval == 0 {
+		// Measure IPMI latency
+		latency, err := c.measureIPMILatency(3)
+		if err != nil {
+			return err
+		}
+		c.cfg.IPMILatency = latency
+		fmt.Printf("  IPMI latency (avg)              : %v\n", latency)
+
+		// Detect BMC sensor refresh rate
+		fmt.Println("  Detecting BMC sensor refresh rate (up to 15 seconds)...")
+		bmcRefreshRate, err := c.detectBMCRefreshRate(15 * time.Second)
+		if err != nil {
+			fmt.Printf("  Warning: BMC detection failed: %v (using default 5s)\n", err)
+		}
+		fmt.Printf("  BMC sensor refresh rate         : %v\n", bmcRefreshRate)
+
+		// Calculate CHECK_INTERVAL = max(IPMI_LATENCY × 2.5 + safety margin, BMC_REFRESH_RATE)
+		safetyMargin := 500 * time.Millisecond
+		if !c.cfg.NetworkMode {
+			safetyMargin = 100 * time.Millisecond
+		}
+
+		calculatedInterval := latency*5/2 + safetyMargin // 2.5x latency + safety
+		if calculatedInterval < bmcRefreshRate {
+			calculatedInterval = bmcRefreshRate
+		}
+
+		// Enforce min/max bounds
+		if calculatedInterval < 1*time.Second {
+			calculatedInterval = 1 * time.Second
+		}
+		if calculatedInterval > 60*time.Second {
+			calculatedInterval = 60 * time.Second
+		}
+
+		c.cfg.CheckInterval = calculatedInterval
+		fmt.Printf("  Calculated CHECK_INTERVAL       : %v\n", c.cfg.CheckInterval)
+	} else {
+		fmt.Printf("  CHECK_INTERVAL (user-set)       : %v\n", c.cfg.CheckInterval)
+	}
+
+	// Set APPLY_INTERVAL = CHECK_INTERVAL (apply on every cycle)
+	c.cfg.ApplyInterval = c.cfg.CheckInterval
+	fmt.Printf("  APPLY_INTERVAL (auto)            : %v (same as CHECK_INTERVAL)\n", c.cfg.ApplyInterval)
+
+	// Calculate or use user-provided LOG_INTERVAL
+	if c.cfg.LogInterval == 0 {
+		// Default: 5× CHECK_INTERVAL, capped at 30 seconds
+		c.cfg.LogInterval = c.cfg.CheckInterval * 5
+		if c.cfg.LogInterval > 30*time.Second {
+			c.cfg.LogInterval = 30 * time.Second
+		}
+		fmt.Printf("  LOG_INTERVAL (auto)              : %v (5× CHECK_INTERVAL, max 30s)\n", c.cfg.LogInterval)
+	} else {
+		fmt.Printf("  LOG_INTERVAL (user-set)          : %v\n", c.cfg.LogInterval)
+	}
+
+	// Recalculate IPMI failures allowed now that we know CHECK_INTERVAL
+	if c.cfg.MaximumIPMIUnreachableDuration > 0 {
+		c.ipmiFailuresAllowed = int(math.Ceil(float64(c.cfg.MaximumIPMIUnreachableDuration) / float64(c.cfg.CheckInterval)))
+		if c.ipmiFailuresAllowed < 1 {
+			c.ipmiFailuresAllowed = 1
+		}
+	}
+
+	fmt.Println()
+	return nil
 }
 
 // runIPMI executes an ipmitool command and returns its output.

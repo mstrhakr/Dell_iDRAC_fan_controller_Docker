@@ -25,7 +25,9 @@ func (c *Controller) logStartup() {
 		fmt.Printf("CPU threshold        : %d°C\n", c.cfg.CPUTemperatureThreshold)
 	}
 	fmt.Printf("GPU temp source      : %s  (threshold %d°C)\n", c.cfg.GPUTemperatureSource, c.cfg.GPUTemperatureThreshold)
-	fmt.Printf("Check interval       : %s\n\n", c.cfg.CheckInterval)
+	fmt.Printf("Check interval       : %s\n", c.cfg.CheckInterval)
+	fmt.Printf("Apply interval       : %s\n", c.cfg.ApplyInterval)
+	fmt.Printf("Log interval         : %s\n\n", c.cfg.LogInterval)
 
 	fmt.Println("Date & time            Inlet   Raw   EMA   Fan%   Profile                  Comment")
 }
