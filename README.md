@@ -226,9 +226,9 @@ All parameters are optional as they have default values (including default iDRAC
 - `IDRAC_USERNAME` parameter is only necessary if you're adressing a distant iDRAC. **Default** value is "root".
 - `IDRAC_PASSWORD` parameter is only necessary if you're adressing a distant iDRAC. **Default** value is "calvin".
 - `FAN_PROFILE` selects a startup-only fan-control preset. **Default** value is `balanced`.
-  - `quiet` targets 62°C with a gradual PID response.
-  - `balanced` targets 57°C and is the recommended general-purpose setting.
-  - `performance` targets 51°C with an earlier, firmer response.
+  - `quiet` targets 70°C with a gradual PID response.
+  - `balanced` targets 65°C and is the recommended general-purpose setting.
+  - `performance` targets 60°C with an earlier, firmer response.
   - `manual` disables PID control and uses `FAN_SPEED` instead.
   - Explicit low-level settings such as `CPU_TEMPERATURE_THRESHOLD`, `AUTO_MODE_TEMPERATURE_MARGIN`, `PID_GAIN_*`, `RATE_OF_CHANGE_BOOST`, or `AUTO_MODE` override the matching profile setting. Restart the container after changing a profile.
 - `AUTO_MODE` enables the automatic PID fan controller. **Default** value is true. It adjusts the fan command from the hottest CPU or GPU temperature, with bounded per-cycle changes to avoid oscillation. Set it to `false` to use the fixed `FAN_SPEED` behavior instead.

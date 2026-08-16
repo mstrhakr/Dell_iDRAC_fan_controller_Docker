@@ -27,11 +27,11 @@ type fanProfile struct {
 func resolveFanProfile(value string) (fanProfile, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "balanced":
-		return fanProfile{"balanced", 60, 3, 1.5, 0.1, 0.5, 1.0, true}, nil
+		return fanProfile{"balanced", 70, 5, 1.0, 0.05, 0.4, 0.75, true}, nil
 	case "quiet":
-		return fanProfile{"quiet", 65, 3, 0.8, 0.05, 0.3, 0.5, true}, nil
+		return fanProfile{"quiet", 75, 5, 0.7, 0.03, 0.25, 0.5, true}, nil
 	case "performance":
-		return fanProfile{"performance", 55, 4, 2.0, 0.15, 0.8, 1.5, true}, nil
+		return fanProfile{"performance", 65, 5, 1.3, 0.07, 0.5, 1.0, true}, nil
 	case "manual":
 		return fanProfile{"manual", 60, 3, 1.5, 0.1, 0.5, 1.0, false}, nil
 	default:

@@ -70,9 +70,9 @@ func TestResolveFanProfile(t *testing.T) {
 		margin    int
 		autoMode  bool
 	}{
-		"quiet":       {65, 3, true},
-		"balanced":    {60, 3, true},
-		"performance": {55, 4, true},
+		"quiet":       {75, 5, true},
+		"balanced":    {70, 5, true},
+		"performance": {65, 5, true},
 		"manual":      {60, 3, false},
 	}
 	for name, want := range cases {
