@@ -31,13 +31,9 @@ jobs:
         run: go vet ./...
 
   build:
-    name: Build ${{ matrix.arch }} binary
+    name: Build amd64 binary
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    strategy:
-      fail-fast: false
-      matrix:
-        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v7
 
@@ -48,7 +44,7 @@ jobs:
       - name: Cross-compile controller
         env:
           GOOS: linux
-          GOARCH: ${{ matrix.arch }}
+          GOARCH: amd64
           CGO_ENABLED: 0
         run: go build ./cmd/controller
 
