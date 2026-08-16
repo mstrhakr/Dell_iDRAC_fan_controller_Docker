@@ -13,7 +13,7 @@ name: Shellcheck
 # The tests/ tree stays out for the reason those three do not have : the suite runs on every pull request,
 # so a mistake in it is found the moment it is pushed rather than at release time.
 #
-# -x resolves the "source functions.sh" / "source constants.sh" lines so shared declarations are understood
+# -x resolves sourced test helpers so shared declarations are understood
 # correctly instead of reported as unknown or unused when the sourcing file is linted on its own.
 #
 # See .shellcheckrc for the two codes disabled project-wide, and the "shellcheck disable" comments at the
@@ -40,11 +40,10 @@ jobs:
       - name: Run shellcheck
         run: |
           shellcheck -x \
-            Dell_iDRAC_fan_controller.sh \
-            functions.sh \
-            constants.sh \
-            healthcheck.sh \
-            supervisor.sh \
             .github/generate_dockerhub_description.sh \
             .github/reconcile_latest_tag.sh \
-            .github/release_note_already_exists.sh
+            .github/release_note_already_exists.sh \
+            tests/run_tests.sh \
+            tests/lib/assertions.sh \
+            tests/lib/reports.sh \
+            tests/cases/*.sh

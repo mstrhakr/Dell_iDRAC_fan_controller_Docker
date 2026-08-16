@@ -38,8 +38,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Run the test suite
-        run: ./tests/run_tests.sh --summary "$GITHUB_STEP_SUMMARY"
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+
+      - name: Run Go tests
+        run: go test ./...
 
   build:
     name: Build and publish Docker image to Docker Hub and GitHub Containers Repository

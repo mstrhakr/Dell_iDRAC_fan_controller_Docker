@@ -31,7 +31,7 @@ function run_the_runner_on_a_probe_case_file() {
   done
   cp "$TESTS_DIRECTORY/run_tests.sh" "$PROBE_REPOSITORY/tests/"
   cp -r "$TESTS_DIRECTORY/lib" "$TESTS_DIRECTORY/mocks" "$PROBE_REPOSITORY/tests/"
-  printf '%s\n' "$PROBE_CONTENT" > "$PROBE_REPOSITORY/tests/cases/50_probe.sh"
+  printf '%s\n' "$PROBE_CONTENT" > "$PROBE_REPOSITORY/tests/cases/99_probe.sh"
 
   PROBE_OUTPUT=$(bash "$PROBE_REPOSITORY/tests/run_tests.sh" --no-color 2>&1)
   PROBE_EXIT_CODE=$?

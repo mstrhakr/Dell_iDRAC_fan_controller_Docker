@@ -86,12 +86,7 @@ fi
 
 # Load the helpers, then the code under test
 source "$TESTS_DIRECTORY/lib/assertions.sh"
-source "$TESTS_DIRECTORY/lib/fixtures.sh"
-source "$TESTS_DIRECTORY/lib/dell_server_catalogue.sh"
-source "$TESTS_DIRECTORY/lib/harness.sh"
 source "$TESTS_DIRECTORY/lib/reports.sh"
-source "$REPO_ROOT/functions.sh"
-source "$REPO_ROOT/constants.sh"
 
 
 # Collect the test case names of a file, in declaration order (declare -F would
@@ -109,7 +104,7 @@ function humanize_test_case_name() {
   printf '%s' "${NAME//_/ }"
 }
 
-# tests/cases/20_conversions.sh -> "conversions"
+# tests/cases/14_latest_tag_reconciliation.sh -> "latest tag reconciliation"
 function humanize_test_file_name() {
   local NAME
   NAME="$(basename "$1" .sh)"

@@ -7,7 +7,7 @@ SPDX-License-Identifier: AGPL-3.0-only
 
 Contributions are what make the open source community such an amazing place to learn, inspire and create. Any contribution you make is **greatly appreciated**.
 
-This page covers the licensing side of contributing. For the practical side — how to build the image, how to run the controller from a plain checkout, how to run and extend the test suite — see the [Contributing](./README.md#contributing) section of the README and [`tests/README.md`](./tests/README.md).
+This page covers the licensing side of contributing. For the practical side — how to build the image, run the Go controller, and run its tests — see the [Contributing](./README.md#contributing) section of the README.
 
 ## Licensing of your contributions
 
@@ -57,13 +57,11 @@ Forgot it on the last commit ? `git commit --amend -s`. On several ? `git rebase
 
 ## Licence headers
 
-Every shell script carries a two-line [SPDX](https://spdx.dev/) header, right after the shebang:
+Every source file carries a two-line [SPDX](https://spdx.dev/) header:
 
-```bash
-#!/bin/bash
-
-# SPDX-FileCopyrightText: 2020-2026 Tigerblue77 and the Dell iDRAC fan controller Docker image contributors
-# SPDX-License-Identifier: AGPL-3.0-only
+```
+SPDX-FileCopyrightText: 2020-2026 Tigerblue77 and the Dell iDRAC fan controller Docker image contributors
+SPDX-License-Identifier: AGPL-3.0-only
 ```
 
 Copy it into any new file you add — including test cases, mocks and helpers. It is what lets a downstream packager or an automated scanner tell what the file is under without reading the whole repository, and it is how AGPL-3.0 section 5(a) is satisfied file by file.
@@ -72,7 +70,7 @@ Do not add your own copyright line: the collective notice above already covers e
 
 ## Before opening a pull request
 
-- Run the test suite: `./tests/run_tests.sh`. It needs no Dell hardware, no iDRAC and no network.
-- Add a test case for what you changed. The suite covers every PowerEdge generation from the 9th to the 17th, and a behaviour with no test is a behaviour the next refactor is free to break.
-- Keep [`shellcheck`](https://www.shellcheck.net/) quiet — CI runs it on every push.
+- Run the controller tests: `go test ./...`. They need no Dell hardware, no iDRAC and no network.
+- Add a Go test for behavior you change.
+- If you change a release helper under `.github`, run `./tests/run_tests.sh` and keep [`shellcheck`](https://www.shellcheck.net/) quiet.
 - Say which server model and iDRAC generation you tested on, if you tested on real hardware. That context is worth more than it looks in a project that talks to twenty years of firmware.

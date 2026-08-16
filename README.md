@@ -288,36 +288,16 @@ The three boolean parameters above accept **only the lowercase literals `true` a
 <!-- STOPPING THE CONTAINER -->
 ## Stopping the container
 
-While the container runs, the fans are held at your `FAN_SPEED` and the server's own thermal regulation is switched off. **Stopping the container is what gives it back**, so that is not a detail of the shutdown — it is the moment the server stops depending on this container to stay cool.
+While the container runs, the fans are held at the speed selected by the controller and the server's own thermal regulation is switched off. Shutdown therefore has to leave the server at a safe fan speed.
 
-On `docker stop`, `docker restart`, a host shutdown or a `docker compose down`, the container:
-
-1. applies Dell's default dynamic fan control profile, handing the fans back to the iDRAC;
-2. resets the third-party PCIe card cooling response to Dell's default, unless you set `KEEP_THIRD_PARTY_PCIE_CARD_COOLING_RESPONSE_STATE_ON_EXIT=true`;
-3. exits.
-
-It says so in the log, and that line is the one to look for when you stop it:
+The Go controller runs directly as the container's PID 1. On `docker stop`, `docker restart`, a host shutdown or a `docker compose down`, it catches `SIGTERM` and sets the fans to 100% before exiting. The log confirms the safety action:
 
 ```
-/!\ Warning /!\ Container stopped, Dell default dynamic fan control profile applied for safety. Exiting.
+Received signal: terminated. Setting fans to 100% for safety...
+Fans set to 100% for emergency cooling.
 ```
 
-In `MONITORING_ONLY_MODE` nothing was ever applied, so nothing is restored and no command is sent.
-
-### Give it time to do it
-
-The container's PID 1 is a small supervisor whose only job is to make sure step 1 happens even if the monitoring process cannot do it itself. It forwards the stop signal, gives the monitoring process **3 seconds** to bow out cleanly, kills it if it has not, and then applies Dell's profile on its behalf.
-
-That needs Docker's stop timeout to be **longer than those 3 seconds**. The default is 10 seconds, so nothing has to be configured — but if you shorten it, you can cut the container off before it has handed the fans back:
-
-| Where | Keep it above 3 seconds |
-| --- | --- |
-| `docker stop -t <seconds>` | the default is 10 |
-| `docker run --stop-timeout <seconds>` | the default is 10 |
-| `stop_grace_period:` in `docker-compose.yml` | the default is 10s |
-| `terminationGracePeriodSeconds:` on Kubernetes | the default is 30 |
-
-Past that timeout the container is `SIGKILL`ed, which no program can catch or delay, and **the fans stay at your `FAN_SPEED` with nothing left to raise them**. The safety net is defeated precisely in the case it exists for, so if you have a reason to stop containers quickly, exclude this one.
+Do not force the container to stop with `SIGKILL`: no process can catch it, so the controller cannot apply the 100% safety speed.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 
@@ -479,26 +459,18 @@ export DISABLE_THIRD_PARTY_PCIE_CARD_DELL_DEFAULT_COOLING_RESPONSE=<true or fals
 export KEEP_THIRD_PARTY_PCIE_CARD_COOLING_RESPONSE_STATE_ON_EXIT=<true or false>
 export MONITORING_ONLY_MODE=<true or false>
 
-chmod +x Dell_iDRAC_fan_controller.sh
-./Dell_iDRAC_fan_controller.sh
+go run ./cmd/controller
 ```
 
 ### Automated tests
 
-The repository ships an automated test suite that runs the controller against a mocked `ipmitool`, so it needs **no Dell hardware, no iDRAC and no network** : `bash`, `coreutils`, GNU `grep` and `awk` are enough.
+The controller's unit tests need no Dell hardware, iDRAC or network:
 
 ```bash
-./tests/run_tests.sh                 # run everything
-./tests/run_tests.sh --list          # list the test cases without running them
-./tests/run_tests.sh -f temperature  # only run the test cases whose name matches
-./tests/run_tests.sh --tap           # emit TAP output for a CI parser
+go test ./...
 ```
 
-It covers every PowerEdge generation from the 9th (2006) to the 17th (2024) — including the recent ones whose firmware no longer accepts Dell's IPMI raw fan control commands — in their single, dual and quad socket variants, plus the sensor layouts they report (missing exhaust sensor, empty second socket, unreadable reading, two-digit sensor IDs...).
-
-Blades and modular servers are covered too : the M1000e and VRTX blades, the FX2 and MX7000 sleds and the nodes of a C-series chassis. They carry no fan of their own — the enclosure does, driven by its CMC — so this container cannot cool them, and the suite pins what it does instead : identify the server, report that the fan control commands were rejected, and keep monitoring.
-
-The suite also runs on every push and pull request through the [`Tests`](.github/workflows/tests.yml) workflow, both directly and inside the built Docker image. Each run publishes a report on the pull request : the test count compared against the base commit, and, behind the check run, every test case that ran with what a failing one expected and what it obtained. See [`tests/README.md`](./tests/README.md) for the layout and for how to add a test case.
+The [`Tests`](.github/workflows/tests.yml) workflow runs the Go tests, validates the release helper scripts, and builds the Docker image on every push and pull request. See [`tests/README.md`](./tests/README.md) for the release-helper test suite.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 

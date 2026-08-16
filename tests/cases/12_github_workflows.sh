@@ -137,7 +137,7 @@ function test_every_workflow_carries_the_licence_header() {
     # Read from the head of the file : a header is only a header where a reader
     # and a scanner both find it, and one buried below the job it belongs to
     # discharges nothing
-    if ! head -5 "$WORKFLOW" | grep -q '^# SPDX-License-Identifier: AGPL-3.0-only$'; then
+    if ! head -5 "$WORKFLOW" | grep -q '^# SPDX-License-Identifier: AGPL-3.0-only[[:space:]]*$'; then
       UNCOVERED="$UNCOVERED ${WORKFLOW#"$REPO_ROOT"/}"
     fi
   done

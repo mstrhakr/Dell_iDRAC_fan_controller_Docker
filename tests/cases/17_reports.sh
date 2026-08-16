@@ -44,7 +44,7 @@ function write_a_junit_report_from_a_probe_run() {
     printf 'function %s_that_passes() { assert_equals "1" "1" ; }\n' "$REPORT_PROBE_PREFIX"
     printf 'function %s_that_fails() { assert_equals "1" "2" "a message the report carries" ; }\n' "$REPORT_PROBE_PREFIX"
     printf 'function %s_that_is_skipped() { skip_test "nothing to run here" ; }\n' "$REPORT_PROBE_PREFIX"
-  } > "$PROBE_REPOSITORY/tests/cases/50_probe.sh"
+  } > "$PROBE_REPOSITORY/tests/cases/99_probe.sh"
 
   bash "$PROBE_REPOSITORY/tests/run_tests.sh" --junit "$REPORT" --no-color > /dev/null 2>&1
 
