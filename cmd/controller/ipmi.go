@@ -241,7 +241,43 @@ func (c *Controller) recordIPMIFailure() bool {
 	return c.ipmiFailuresAllowed > 0 && c.ipmiFailures >= c.ipmiFailuresAllowed
 }
 
-// ────────────────────── helpers ───────────────────────────────────
+// setFansToMaxSpeed sets both fans to 100% speed for emergency cooling.
+func (c *Controller) setFansToMaxSpeed() error {
+	// Disable IPMI automatic control first
+	if _, err := c.runIPMI("raw", "0x30", "0x30", "0x01", "0x00"); err != nil {
+		return fmt.Errorf("failed to disable IPMI auto mode: %w", err)
+	}
+	// Set fans to 100%
+	_, err := c.runIPMI("raw", "0x30", "0x30", "0x02", "0xff", "0x64")
+	return err
+}
+
+// safetyExit attempts to set fans to 100% before exiting.
+// reason is logged to indicate why the exit occurred (signal, panic, error).
+func (c *Controller) safetyExit(reason string) {
+	fmt.Fprintf(os.Stderr, "Safety exit triggered by %s.\n", reason)
+
+	// Try to set fans to max, but don't fail if IPMI is unreachable
+	if err := c.setFansToMaxSpeed(); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: Could not set fans to 100%%: %v\n", err)
+		fmt.Fprintf(os.Stderr, "Ensure manual fan control or reboot the server to restore iDRAC automatic cooling.\n")
+	} else {
+		fmt.Fprintf(os.Stderr, "Fans set to 100%% for emergency cooling.\n")
+	}
+
+	// If configured to keep third-party cooling state, restore it
+	if c.cfg.KeepThirdPartyCoolingStateOnExit {
+		if err := c.applyDellDefault(); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: Could not restore Dell default cooling: %v\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "Dell default cooling restored.\n")
+		}
+	}
+
+	os.Exit(1)
+}
+
+// ────────────────────── helpers ───────────────────────────────
 
 func valueAfterColon(line string) string {
 	parts := strings.SplitN(line, ":", 2)

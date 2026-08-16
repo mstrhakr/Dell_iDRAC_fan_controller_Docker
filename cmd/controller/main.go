@@ -3,7 +3,9 @@ package main
 import (
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -15,8 +17,30 @@ func main() {
 		os.Exit(1)
 	}
 	c := newController(cfg)
+
+	// Set up signal handling for graceful shutdown
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
+	go func() {
+		sig := <-sigChan
+		fmt.Fprintf(os.Stderr, "\n%s  Received signal: %v. Setting fans to 100%% for safety...\n",
+			time.Now().Format("02-01-2006 15:04:05"), sig)
+		c.safetyExit("signal")
+	}()
+
+	// Set up panic recovery
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Fprintf(os.Stderr, "%s  PANIC: %v. Setting fans to 100%% for safety...\n",
+				time.Now().Format("02-01-2006 15:04:05"), r)
+			c.safetyExit("panic")
+		}
+	}()
+
 	if err := c.run(); err != nil {
-		fmt.Fprintf(os.Stderr, "%v\n", err)
+		fmt.Fprintf(os.Stderr, "%s  Fatal error: %v. Setting fans to 100%% for safety...\n",
+			time.Now().Format("02-01-2006 15:04:05"), err)
+		c.safetyExit("error")
 		os.Exit(1)
 	}
 }
@@ -43,7 +67,6 @@ func (c *Controller) run() error {
 	}
 
 	c.logStartup()
-
 
 	for {
 		start := time.Now()

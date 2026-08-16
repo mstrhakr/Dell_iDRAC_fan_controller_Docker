@@ -7,16 +7,16 @@ import (
 
 // Config holds all controller configuration.
 type Config struct {
-	IDRACHost        string
-	IDRACUsername    string
-	IDRACPassword    string
-	NetworkMode      bool
-	LocalIPMIDevice  string
-	FanSpeed         int
-	CheckInterval    time.Duration
-	ApplyInterval    time.Duration // When to apply PID commands
-	LogInterval      time.Duration // When to log aggregated stats
-	IPMILatency      time.Duration // Measured at startup
+	IDRACHost       string
+	IDRACUsername   string
+	IDRACPassword   string
+	NetworkMode     bool
+	LocalIPMIDevice string
+	FanSpeed        int
+	CheckInterval   time.Duration
+	ApplyInterval   time.Duration // When to apply PID commands
+	LogInterval     time.Duration // When to log aggregated stats
+	IPMILatency     time.Duration // Measured at startup
 
 	// Threshold / target
 	CPUTemperatureThreshold int
@@ -24,13 +24,13 @@ type Config struct {
 	GPUTemperatureThreshold int
 
 	// PID tuning
-	AutoMode              bool
-	PIDKp                 float64
-	PIDKi                 float64
-	PIDKd                 float64
-	PIDIntegralLimit      float64
-	AutoModeFanSpeedMin   int
-	AutoModeFanSpeedMax   int
+	AutoMode                  bool
+	PIDKp                     float64
+	PIDKi                     float64
+	PIDKd                     float64
+	PIDIntegralLimit          float64
+	AutoModeFanSpeedMin       int
+	AutoModeFanSpeedMax       int
 	AutoModeTemperatureMargin int
 
 	// EMA smoothing
