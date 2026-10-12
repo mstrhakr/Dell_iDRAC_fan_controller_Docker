@@ -1,7 +1,7 @@
 # SPDX-FileCopyrightText: 2020-2026 Tigerblue77 and the Dell iDRAC fan controller Docker image contributors
 # SPDX-License-Identifier: AGPL-3.0-only
 
-FROM golang:1.23-bookworm AS builder
+FROM golang:1.27-bookworm AS builder
 WORKDIR /src
 
 COPY go.mod ./
