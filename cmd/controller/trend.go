@@ -81,6 +81,9 @@ func (c *Controller) recordTrend(timestamp time.Time, temperature, target float6
 			if floor > baselineMaximumFloor {
 				floor = baselineMaximumFloor
 			}
+			// Learned policy must never advertise a floor below a user-selected
+			// minimum, even when that minimum exceeds our conservative boost cap.
+			floor = max(c.cfg.AutoModeFanSpeedMin, min(floor, c.cfg.AutoModeFanSpeedMax))
 			c.trend.baselineFloor = floor
 		}
 	}

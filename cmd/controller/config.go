@@ -12,6 +12,7 @@ import (
 )
 
 const defaultAutoTemperatureThreshold = 60
+const defaultMinimumFanSpeed = 10
 
 type fanProfile struct {
 	name      string
@@ -56,7 +57,7 @@ func loadConfig() (Config, error) {
 		IDRACHost:                        envOrDefault("IDRAC_HOST", "local"),
 		IDRACUsername:                    os.Getenv("IDRAC_USERNAME"),
 		IDRACPassword:                    os.Getenv("IDRAC_PASSWORD"),
-		FanSpeed:                         5,
+		FanSpeed:                         defaultMinimumFanSpeed,
 		CheckInterval:                    0, // Will be auto-calculated
 		ApplyInterval:                    0, // Will be auto-calculated
 		LogInterval:                      0, // Will be auto-calculated
@@ -69,7 +70,7 @@ func loadConfig() (Config, error) {
 		PIDKi:                            0.1,
 		PIDKd:                            0.5,
 		PIDIntegralLimit:                 20.0,
-		AutoModeFanSpeedMin:              10,
+		AutoModeFanSpeedMin:              defaultMinimumFanSpeed,
 		AutoModeFanSpeedMax:              100,
 		AutoModeTemperatureMargin:        3,
 		FanRampUp:                        defaultFanRampUp,
@@ -125,6 +126,14 @@ func loadConfig() (Config, error) {
 		cfg.FanSpeed, err = parseFanSpeed(value)
 		if err != nil {
 			return cfg, fmt.Errorf("FAN_SPEED: %w", err)
+		}
+	}
+
+	// Automatic duty floor (independent of the static FAN_SPEED selection).
+	if value, ok := optionalEnv("AUTO_MODE_FAN_SPEED_MIN"); ok {
+		cfg.AutoModeFanSpeedMin, err = parsePositiveIntInRange(value, 1, cfg.AutoModeFanSpeedMax)
+		if err != nil {
+			return cfg, fmt.Errorf("AUTO_MODE_FAN_SPEED_MIN: %w", err)
 		}
 	}
 
