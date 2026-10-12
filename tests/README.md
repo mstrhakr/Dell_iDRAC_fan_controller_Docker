@@ -24,3 +24,4 @@ The helper suite needs Bash, coreutils, GNU grep, and awk. Reconciliation cases 
 | `cases/15_test_runner.sh` | Test runner failure and discovery behavior |
 | `cases/16_release_note_publication.sh` | Idempotent GitHub release-note publication |
 | `cases/17_reports.sh` | JUnit and Markdown report generation |
+| `cases/18_dependency_policy.sh` | Immutable Action refs and dependency-update policy |
