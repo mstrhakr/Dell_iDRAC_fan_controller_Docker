@@ -136,6 +136,7 @@ func (c *Controller) cycle() error {
 	}
 
 	// Update EMA.
+	sourceChanged := c.prepareThermalControl(controlLabel, controlThreshold)
 	smoothed := c.ema.update(c.cfg.EMAAlpha, float64(controlRaw))
 	sampleTimestamp := time.Now()
 	target := float64(controlThreshold - c.cfg.AutoModeTemperatureMargin)
@@ -222,6 +223,10 @@ func (c *Controller) cycle() error {
 		} else {
 			comment = "No CPU temperature readable"
 		}
+	}
+
+	if sourceChanged {
+		comment += "; thermal control group/threshold changed, learning reset"
 	}
 
 	sample := cycleSample{

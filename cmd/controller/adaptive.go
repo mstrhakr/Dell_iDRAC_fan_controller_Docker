@@ -31,6 +31,7 @@ type adaptiveState struct {
 }
 
 func (c *Controller) recordAdaptiveFloor(timestamp time.Time, temperature, target float64, source string, fan float64) int {
+	source = thermalControlGroup(source)
 	a := &c.adaptive
 	gapLimit := observationGapLimit(c.cfg.CheckInterval)
 	if source != a.source || target != a.target ||

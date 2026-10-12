@@ -106,6 +106,8 @@ type Controller struct {
 	hasPrevSmoothed     bool
 	trend               trendState
 	adaptive            adaptiveState
+	controlGroup        string
+	controlThreshold    int
 	ipmiFailures        int
 	ipmiFailuresAllowed int
 	statsMu             sync.RWMutex
