@@ -32,10 +32,7 @@ type adaptiveState struct {
 
 func (c *Controller) recordAdaptiveFloor(timestamp time.Time, temperature, target float64, source string, fan float64) int {
 	a := &c.adaptive
-	gapLimit := 3 * c.cfg.CheckInterval
-	if gapLimit < 90*time.Second {
-		gapLimit = 90 * time.Second
-	}
+	gapLimit := observationGapLimit(c.cfg.CheckInterval)
 	if source != a.source || target != a.target ||
 		(!a.expires.IsZero() && !timestamp.Before(a.expires)) ||
 		(!a.lastObservation.IsZero() && (timestamp.Before(a.lastObservation) || timestamp.Sub(a.lastObservation) > gapLimit)) {

@@ -32,12 +32,20 @@ func averageTrend(samples []trendSample, since time.Time) float64 {
 // only offered after a stable 90-second observation period and never near the
 // controller's target or high fan speeds.
 func (c *Controller) recordTrend(timestamp time.Time, temperature, target float64, fan int) trendState {
+	if count := len(c.trend.samples); count > 0 {
+		last := c.trend.samples[count-1].timestamp
+		if timestamp.Before(last) || timestamp.Sub(last) > observationGapLimit(c.cfg.CheckInterval) {
+			c.trend = trendState{}
+		}
+	}
 	if c.trend.startupBaseline == 0 {
 		c.trend.startupBaseline = temperature
 	}
 	c.trend.samples = append(c.trend.samples, trendSample{timestamp: timestamp, temp: temperature})
 	oldest := timestamp.Add(-trendWarmupDuration)
-	for len(c.trend.samples) > 0 && c.trend.samples[0].timestamp.Before(oldest) {
+	// Retain one coverage anchor at/before the window boundary. Requiring an
+	// exact boundary sample disables learning under real polling jitter.
+	for len(c.trend.samples) > 1 && !c.trend.samples[1].timestamp.After(oldest) {
 		c.trend.samples = c.trend.samples[1:]
 	}
 
