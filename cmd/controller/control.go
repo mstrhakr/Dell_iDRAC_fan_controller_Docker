@@ -24,10 +24,14 @@ func (c *Controller) prepareThermalControl(source string, threshold int) bool {
 	}
 	changed := c.controlGroup != ""
 	c.controlGroup, c.controlThreshold = group, threshold
+	c.resetThermalEvidence()
+	return changed
+}
+
+func (c *Controller) resetThermalEvidence() {
 	c.ema = emaState{}
 	c.pid.prevError, c.pid.integral = 0, 0
 	c.prevSmoothed, c.hasPrevSmoothed = 0, false
 	c.trend = trendState{}
 	c.adaptive = adaptiveState{}
-	return changed
 }

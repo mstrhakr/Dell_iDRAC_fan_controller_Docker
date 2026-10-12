@@ -108,6 +108,7 @@ type Controller struct {
 	adaptive            adaptiveState
 	controlGroup        string
 	controlThreshold    int
+	lastControlSample   time.Time
 	ipmiFailures        int
 	ipmiFailuresAllowed int
 	statsMu             sync.RWMutex

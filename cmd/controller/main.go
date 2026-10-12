@@ -137,8 +137,9 @@ func (c *Controller) cycle() error {
 
 	// Update EMA.
 	sourceChanged := c.prepareThermalControl(controlLabel, controlThreshold)
-	smoothed := c.ema.update(c.cfg.EMAAlpha, float64(controlRaw))
 	sampleTimestamp := time.Now()
+	elapsed := c.sampleElapsed(sampleTimestamp)
+	smoothed := c.ema.update(scaledEMAAlpha(c.cfg.EMAAlpha, elapsed), float64(controlRaw))
 	target := float64(controlThreshold - c.cfg.AutoModeTemperatureMargin)
 	trend := c.recordTrend(sampleTimestamp, smoothed, target, c.safeRound(c.pid.current))
 
@@ -161,7 +162,7 @@ func (c *Controller) cycle() error {
 		if adaptiveFloor > 0 {
 			adaptiveUntil = c.adaptive.expires.Unix()
 		}
-		speed, roc := c.automaticFanStep(smoothed, float64(controlRaw), float64(controlThreshold), trend)
+		speed, roc := c.automaticFanStepOverInterval(smoothed, float64(controlRaw), float64(controlThreshold), trend, elapsed)
 		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(speed); err != nil {
@@ -180,7 +181,7 @@ func (c *Controller) cycle() error {
 			comment = fmt.Sprintf("Sustained warming: 30s average %.1f°C above 90s %.1f°C, fan↑%d%%",
 				trend.average30, trend.average90, speed)
 		case roc >= c.cfg.RateOfChangeTriggerPerCycle:
-			comment = fmt.Sprintf("Rising fast (+%.1f°C/cycle): %s raw=%d°C, boosted to %d%%",
+			comment = fmt.Sprintf("Rising fast (+%.1f°C/5s): %s raw=%d°C, boosted to %d%%",
 				roc, controlLabel, controlRaw, speed)
 		case smoothed > target && speed > prevFan:
 			comment = fmt.Sprintf("Stabilizing: %s EMA=%.1f°C, fan↑%d%%",

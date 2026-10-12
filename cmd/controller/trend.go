@@ -32,8 +32,10 @@ func averageTrend(samples []trendSample, since time.Time) float64 {
 // only offered after a stable 90-second observation period and never near the
 // controller's target or high fan speeds.
 func (c *Controller) recordTrend(timestamp time.Time, temperature, target float64, fan int) trendState {
+	elapsed := effectiveControlInterval(c.cfg.CheckInterval)
 	if count := len(c.trend.samples); count > 0 {
 		last := c.trend.samples[count-1].timestamp
+		elapsed = timestamp.Sub(last)
 		if timestamp.Before(last) || timestamp.Sub(last) > observationGapLimit(c.cfg.CheckInterval) {
 			c.trend = trendState{}
 		}
@@ -67,7 +69,8 @@ func (c *Controller) recordTrend(timestamp time.Time, temperature, target float6
 			c.trend.learnedBaseline = c.trend.average90
 			c.trend.baselineReady = true
 		} else {
-			c.trend.learnedBaseline = 0.02*c.trend.average90 + 0.98*c.trend.learnedBaseline
+			alpha := scaledEMAAlpha(0.02, elapsed)
+			c.trend.learnedBaseline = alpha*c.trend.average90 + (1-alpha)*c.trend.learnedBaseline
 		}
 	}
 

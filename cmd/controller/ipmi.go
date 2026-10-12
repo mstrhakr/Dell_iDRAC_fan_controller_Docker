@@ -49,7 +49,7 @@ func (c *Controller) measureIPMILatency(samples int) (time.Duration, error) {
 	return avgLatency, nil
 }
 
-const defaultCheckInterval = 5 * time.Second
+const defaultCheckInterval = controlReferenceInterval
 
 // automaticCheckInterval uses a predictable baseline while ensuring one IPMI
 // request has time to finish before the next control cycle begins.

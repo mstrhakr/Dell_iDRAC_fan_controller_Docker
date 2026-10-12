@@ -101,11 +101,11 @@ func (c *Controller) logStartup() {
 	if c.cfg.AutoMode {
 		target := c.cfg.CPUTemperatureThreshold - c.cfg.AutoModeTemperatureMargin
 		fmt.Println("Fan control mode     : AUTO (Go PID controller)")
-		fmt.Printf("PID gains            : Kp=%.2f  Ki=%.2f  Kd=%.2f\n", c.cfg.PIDKp, c.cfg.PIDKi, c.cfg.PIDKd)
+		fmt.Printf("PID gains            : Kp=%.3f  Ki=%.3f  Kd=%.3f (5s reference cadence)\n", c.cfg.PIDKp, c.cfg.PIDKi, c.cfg.PIDKd)
 		fmt.Printf("Fan speed range      : %d%% - %d%%\n", c.cfg.AutoModeFanSpeedMin, c.cfg.AutoModeFanSpeedMax)
 		fmt.Printf("Target temperature   : %dC  (threshold %dC - margin %dC)\n", target, c.cfg.CPUTemperatureThreshold, c.cfg.AutoModeTemperatureMargin)
 		fmt.Printf("EMA smoothing alpha  : %.2f\n", c.cfg.EMAAlpha)
-		fmt.Printf("Rate-of-change guard : trigger %.1fC/cycle, boost gain %.1fx\n", c.cfg.RateOfChangeTriggerPerCycle, c.cfg.RateOfChangeBoostGain)
+		fmt.Printf("Rate-of-change guard : trigger %.1fC/5s, boost gain %.1fx\n", c.cfg.RateOfChangeTriggerPerCycle, c.cfg.RateOfChangeBoostGain)
 	} else {
 		fmt.Printf("Fan speed objective  : %d%%\n", c.cfg.FanSpeed)
 		fmt.Printf("CPU threshold        : %d°C\n", c.cfg.CPUTemperatureThreshold)

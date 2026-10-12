@@ -1,6 +1,9 @@
 package main
 
-import "math"
+import (
+	"math"
+	"time"
+)
 
 const (
 	maxFanSpeedChangePerCycle = 10.0
@@ -10,7 +13,7 @@ const (
 )
 
 // pidStep computes the next integer fan speed and returns the rate of change
-// of the EMA temperature (degrees per cycle) for logging.
+// of the EMA temperature (degrees per five reference seconds) for logging.
 func (c *Controller) pidStep(smoothedTemp, threshold float64) (int, float64) {
 	return c.automaticFanStep(smoothedTemp, smoothedTemp, threshold, trendState{})
 }
@@ -18,6 +21,12 @@ func (c *Controller) pidStep(smoothedTemp, threshold float64) (int, float64) {
 // automaticFanStep limits the combined PID and trend correction, retaining
 // fractional duty changes so slow ramps still progress at short check intervals.
 func (c *Controller) automaticFanStep(smoothedTemp, rawTemp, threshold float64, trend trendState) (int, float64) {
+	return c.automaticFanStepOverInterval(smoothedTemp, rawTemp, threshold, trend, effectiveControlInterval(c.cfg.CheckInterval))
+}
+
+func (c *Controller) automaticFanStepOverInterval(smoothedTemp, rawTemp, threshold float64, trend trendState, elapsed time.Duration) (int, float64) {
+	elapsed = effectiveControlInterval(elapsed)
+	steps := float64(elapsed) / float64(controlReferenceInterval)
 	// Aim for (threshold - margin) to stay comfortable below the limit.
 	target := threshold - float64(c.cfg.AutoModeTemperatureMargin)
 	errNow := smoothedTemp - target // positive = too hot
@@ -27,7 +36,7 @@ func (c *Controller) automaticFanStep(smoothedTemp, rawTemp, threshold float64, 
 	if math.Abs(errNow) < pidTemperatureDeadband || errNow*c.pid.prevError < 0 {
 		c.pid.integral = 0
 	} else {
-		c.pid.integral += errNow
+		c.pid.integral += errNow * steps
 	}
 
 	// Integral with symmetric anti-windup.
@@ -39,12 +48,15 @@ func (c *Controller) automaticFanStep(smoothedTemp, rawTemp, threshold float64, 
 	}
 
 	// Derivative on smoothed error
-	errRate := errNow - c.pid.prevError
+	errRate := 0.0
+	if c.hasPrevSmoothed {
+		errRate = (errNow - c.pid.prevError) / steps
+	}
 
 	// Rate-of-change guard: if EMA is rising fast, pre-empt with extra boost.
 	roc := 0.0
 	if c.hasPrevSmoothed {
-		roc = smoothedTemp - c.prevSmoothed
+		roc = (smoothedTemp - c.prevSmoothed) / steps
 	}
 	rocBoost := 0.0
 	if roc >= c.cfg.RateOfChangeTriggerPerCycle {
@@ -59,6 +71,7 @@ func (c *Controller) automaticFanStep(smoothedTemp, rawTemp, threshold float64, 
 		// Do not chase sensor noise around the target; rapid warming still acts.
 		delta = rocBoost
 	}
+	delta *= steps
 
 	next := c.pid.current + delta
 	if float64(trend.baselineFloor) > next && next < trendBoostFanCeiling {
@@ -69,10 +82,7 @@ func (c *Controller) automaticFanStep(smoothedTemp, rawTemp, threshold float64, 
 	}
 	next = math.Max(next, float64(c.adaptive.floor))
 
-	interval := c.cfg.CheckInterval.Seconds()
-	if interval <= 0 {
-		interval = defaultCheckInterval.Seconds()
-	}
+	interval := elapsed.Seconds()
 	up, down := c.cfg.FanRampUp, c.cfg.FanRampDown
 	if up <= 0 {
 		up = defaultFanRampUp
