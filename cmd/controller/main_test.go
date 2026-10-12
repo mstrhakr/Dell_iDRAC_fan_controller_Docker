@@ -159,11 +159,11 @@ func TestPIDRateOfChangeBoost(t *testing.T) {
 	c.pid.current = 30
 	c.ema.value = 40
 	c.ema.seeded = true
-	// Large rise in EMA this cycle: prevSmoothed was 37, now 40 => roc=3 > trigger 2
-	c.prevSmoothed = 37.0
+	// Rising rapidly at the target must bypass the normal slow ramp.
+	c.prevSmoothed = 43.0
 	c.hasPrevSmoothed = true
 
-	speedWithROC, roc := c.pidStep(41.0, 50.0)
+	speedWithROC, roc := c.pidStep(47.0, 50.0)
 	if roc < c.cfg.RateOfChangeTriggerPerCycle {
 		t.Fatalf("expected roc >= %.1f, got %.1f", c.cfg.RateOfChangeTriggerPerCycle, roc)
 	}
@@ -173,8 +173,8 @@ func TestPIDRateOfChangeBoost(t *testing.T) {
 	c2.pid.current = 30
 	c2.ema.value = 40
 	c2.ema.seeded = true
-	c2.prevSmoothed = 40.0 // no roc
-	speedWithoutROC, _ := c2.pidStep(41.0, 50.0)
+	c2.prevSmoothed = 47.0 // no roc
+	speedWithoutROC, _ := c2.pidStep(47.0, 50.0)
 
 	if speedWithROC <= speedWithoutROC {
 		t.Fatalf("roc boost: expected %d > %d", speedWithROC, speedWithoutROC)
@@ -219,8 +219,8 @@ func TestPIDClearsIntegralAtTarget(t *testing.T) {
 	if c.pid.integral != 0 {
 		t.Fatalf("integral at target = %v, want 0", c.pid.integral)
 	}
-	if speed >= 60 {
-		t.Fatalf("fan speed at target = %d%%, want it to start decreasing", speed)
+	if speed != 60 {
+		t.Fatalf("fan speed at target = %d%%, want it to hold at 60%%", speed)
 	}
 }
 

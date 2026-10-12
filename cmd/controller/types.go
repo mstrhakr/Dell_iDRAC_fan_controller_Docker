@@ -34,6 +34,8 @@ type Config struct {
 	AutoModeFanSpeedMin       int
 	AutoModeFanSpeedMax       int
 	AutoModeTemperatureMargin int
+	FanRampUp                 float64 // Percentage points per second
+	FanRampDown               float64 // Percentage points per second
 
 	// EMA smoothing
 	EMAAlpha float64

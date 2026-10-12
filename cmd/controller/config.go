@@ -27,11 +27,11 @@ type fanProfile struct {
 func resolveFanProfile(value string) (fanProfile, error) {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "", "balanced":
-		return fanProfile{"balanced", 70, 5, 1.0, 0.05, 0.4, 0.75, true}, nil
+		return fanProfile{"balanced", 70, 5, 0.35, 0.015, 0.4, 0.75, true}, nil
 	case "quiet":
-		return fanProfile{"quiet", 75, 5, 0.7, 0.03, 0.25, 0.5, true}, nil
+		return fanProfile{"quiet", 75, 5, 0.25, 0.01, 0.25, 0.5, true}, nil
 	case "performance":
-		return fanProfile{"performance", 65, 5, 1.3, 0.07, 0.5, 1.0, true}, nil
+		return fanProfile{"performance", 65, 5, 0.5, 0.02, 0.5, 1.0, true}, nil
 	case "manual":
 		return fanProfile{"manual", 60, 3, 1.5, 0.1, 0.5, 1.0, false}, nil
 	default:
@@ -72,6 +72,8 @@ func loadConfig() (Config, error) {
 		AutoModeFanSpeedMin:              10,
 		AutoModeFanSpeedMax:              100,
 		AutoModeTemperatureMargin:        3,
+		FanRampUp:                        defaultFanRampUp,
+		FanRampDown:                      defaultFanRampDown,
 		EMAAlpha:                         0.3,
 		RateOfChangeTriggerPerCycle:      2.0,
 		RateOfChangeBoostGain:            1.0,
@@ -172,6 +174,21 @@ func loadConfig() (Config, error) {
 	}
 
 	// EMA and rate-of-change
+	for _, setting := range []struct {
+		name string
+		dest *float64
+	}{
+		{"FAN_RAMP_UP", &cfg.FanRampUp},
+		{"FAN_RAMP_DOWN", &cfg.FanRampDown},
+	} {
+		if value, ok := optionalEnv(setting.name); ok {
+			*setting.dest, err = parseFloat(value)
+			if err != nil || math.IsNaN(*setting.dest) || math.IsInf(*setting.dest, 0) || *setting.dest <= 0 || *setting.dest > 100 {
+				return cfg, fmt.Errorf("%s must be a finite number in (0, 100] percentage points per second", setting.name)
+			}
+		}
+	}
+
 	cfg.EMAAlpha, err = parseFloat(envOrDefault("EMA_ALPHA", "0.3"))
 	if err != nil {
 		return cfg, fmt.Errorf("EMA_ALPHA: %w", err)

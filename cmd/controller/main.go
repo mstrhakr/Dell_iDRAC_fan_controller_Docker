@@ -153,18 +153,7 @@ func (c *Controller) cycle() error {
 
 	case c.cfg.AutoMode && controlLabel != "":
 		prevFan := c.safeRound(c.pid.current)
-		speed, roc := c.pidStep(smoothed, float64(controlThreshold))
-		if trend.baselineFloor > speed && speed < trendBoostFanCeiling {
-			speed = trend.baselineFloor
-			c.pid.current = float64(speed)
-		}
-		if trend.boost > 0 && speed >= prevFan && speed < trendBoostFanCeiling {
-			speed += trend.boost
-			if speed > trendBoostFanCeiling {
-				speed = trendBoostFanCeiling
-			}
-			c.pid.current = float64(speed)
-		}
+		speed, roc := c.automaticFanStep(smoothed, float64(controlRaw), float64(controlThreshold), trend)
 		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(speed); err != nil {
@@ -173,6 +162,9 @@ func (c *Controller) cycle() error {
 		}
 		profile = fmt.Sprintf("PID Auto Mode (%d%%)", speed)
 		switch {
+		case controlRaw > controlThreshold || smoothed > float64(controlThreshold):
+			comment = fmt.Sprintf("Overtemp: %s raw=%d°C EMA=%.1f°C, threshold %d°C, fan→%d%%",
+				controlLabel, controlRaw, smoothed, controlThreshold, speed)
 		case trend.baselineFloor > prevFan:
 			comment = fmt.Sprintf("Above learned idle: %.1f°C over %.1f°C baseline, fan floor %d%%",
 				smoothed-trend.learnedBaseline, trend.learnedBaseline, speed)
@@ -182,9 +174,6 @@ func (c *Controller) cycle() error {
 		case roc >= c.cfg.RateOfChangeTriggerPerCycle:
 			comment = fmt.Sprintf("Rising fast (+%.1f°C/cycle): %s raw=%d°C, boosted to %d%%",
 				roc, controlLabel, controlRaw, speed)
-		case smoothed > float64(controlThreshold):
-			comment = fmt.Sprintf("Overtemp: %s EMA=%.1f°C > %d°C, fan→%d%%",
-				controlLabel, smoothed, controlThreshold, speed)
 		case smoothed > target && speed > prevFan:
 			comment = fmt.Sprintf("Stabilizing: %s EMA=%.1f°C, fan↑%d%%",
 				controlLabel, smoothed, speed)
