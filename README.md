@@ -169,7 +169,7 @@ version: '3.8'
 
 services:
   Dell_iDRAC_fan_controller:
-    image: tigerblue77/dell_idrac_fan_controller:latest
+    image: mstrhakr/dell_idrac_fan_controller:latest
     container_name: Dell_iDRAC_fan_controller
     restart: unless-stopped
     environment:
