@@ -1,40 +1,65 @@
-# To get started with Dependabot version updates, you'll need to specify which
-# package ecosystems to update and where the package manifests are located.
-# Please see the documentation for more information:
-# https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
-# https://containers.dev/guide/dependabot
+# SPDX-FileCopyrightText: 2020-2026 Tigerblue77 and the Dell iDRAC fan controller Docker image contributors
+# SPDX-License-Identifier: AGPL-3.0-only
+
+# Daily scans preserve prompt updates without one PR per dependency. Majors and
+# security fixes have their own groups so neither is buried in routine updates.
+# SHA-pinned Actions remain pinned when Dependabot proposes a newer release.
+# Grouping is not approval: no automatic merge policy is enabled here.
 
 version: 2
 updates:
-  - package-ecosystem: "devcontainers"
-    directory: "/"
-    schedule:
-      interval: "daily"
-
   - package-ecosystem: "github-actions"
     directory: "/"
-    # Daily rather than weekly : minor and patch updates are grouped and
-    # auto-merged, so checking every day shortens the delay before a fix lands
-    # without adding review work. Major updates are opened sooner too, they
-    # still wait for a manual review
     schedule:
       interval: "daily"
-    # Opening a pull request is the only way Dependabot reports anything, and it
-    # stops opening them once this many are waiting - silently, naming nothing.
-    # The default is 5, and the first scan here hit it exactly : five majors
-    # were raised, the rest were never mentioned again. Majors come one pull
-    # request each and sit until reviewed, so the queue fills easily.
-    # 99, not 0 : zero does not mean "no limit", it disables version updates
-    # altogether and leaves only security ones. A large value is what the
-    # documentation gives as the way to effectively remove the limit
-    open-pull-requests-limit: 99
+    open-pull-requests-limit: 10
     groups:
-      # Minor and patch updates are grouped into a single PR,
-      # auto-merged by the dependabot-auto-merge workflow.
-      # Major updates stay out of the group: one separate PR each,
-      # waiting for manual review (potentially breaking changes).
       github-actions-minor-patch:
         applies-to: version-updates
-        update-types:
-          - "minor"
-          - "patch"
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      github-actions-major:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["major"]
+      github-actions-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: "docker"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+    groups:
+      docker-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      docker-major:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["major"]
+      docker-security:
+        applies-to: security-updates
+        patterns: ["*"]
+
+  - package-ecosystem: "gomod"
+    directory: "/"
+    schedule:
+      interval: "daily"
+    open-pull-requests-limit: 10
+    groups:
+      go-minor-patch:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
+      go-major:
+        applies-to: version-updates
+        patterns: ["*"]
+        update-types: ["major"]
+      go-security:
+        applies-to: security-updates
+        patterns: ["*"]
+# Add another ecosystem only when its manifest is tracked in this repository.
+

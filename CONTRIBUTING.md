@@ -68,6 +68,14 @@ Copy it into any new file you add — including test cases, mocks and helpers. I
 
 Do not add your own copyright line: the collective notice above already covers every contributor, and the commit history is the authoritative record of who wrote what. If you would rather be named explicitly, ask in your pull request and it will be added to [`NOTICE`](./NOTICE).
 
+## Dependency updates
+
+Dependabot scans GitHub Actions, Docker base images, and Go modules daily. Within each ecosystem, minor/patch updates, major updates, and security fixes have separate groups. Grouped PRs still require review; grouping does not enable automatic merging.
+
+External GitHub Actions must use full 40-character commit SHAs with a readable release-version comment. Resolve the commit from the upstream release (peel annotated tags to their commit), rather than guessing a hash. Dependabot can update these pins without reverting to mutable tags.
+
+Validate workflow syntax with `actionlint` and validate Dependabot configuration against its YAML/schema when changing dependency policy. Controller validation remains the Go tests and vet; no separate legacy helper-test suite is maintained.
+
 ## Before opening a pull request
 
 - Run the controller tests: `go test ./...`. They need no Dell hardware, no iDRAC and no network.
