@@ -62,6 +62,7 @@ func loadConfig() (Config, error) {
 		ApplyInterval:                    0, // Will be auto-calculated
 		LogInterval:                      0, // Will be auto-calculated
 		MaximumIPMIUnreachableDuration:   60 * time.Second,
+		IPMICommandTimeout:               defaultIPMICommandTimeout,
 		DisableThirdPartyPCIeCooling:     false,
 		KeepThirdPartyCoolingStateOnExit: false,
 		MonitoringOnlyMode:               false,
@@ -288,8 +289,20 @@ func loadConfig() (Config, error) {
 		cfg.MaximumIPMIUnreachableDuration = 0
 	} else if configuredMaxIPMIUnreachable {
 		cfg.MaximumIPMIUnreachableDuration, err = parseInterval(maxIPMIUnreachable)
-		if err != nil {
-			return cfg, fmt.Errorf("MAXIMUM_IPMI_UNREACHABLE_DURATION: %w", err)
+		if err != nil || cfg.MaximumIPMIUnreachableDuration <= 0 {
+			return cfg, errors.New("MAXIMUM_IPMI_UNREACHABLE_DURATION must be a positive duration, or empty to disable escalation")
+		}
+	}
+	if value, ok := optionalEnv("MAXIMUM_CONSECUTIVE_IPMI_FAILURES"); ok {
+		cfg.MaximumConsecutiveIPMIFailures, err = strconv.Atoi(value)
+		if err != nil || cfg.MaximumConsecutiveIPMIFailures <= 0 {
+			return cfg, errors.New("MAXIMUM_CONSECUTIVE_IPMI_FAILURES must be a positive integer")
+		}
+	}
+	if value, ok := optionalEnv("IPMI_COMMAND_TIMEOUT"); ok {
+		cfg.IPMICommandTimeout, err = parseInterval(value)
+		if err != nil || cfg.IPMICommandTimeout <= 0 || cfg.IPMICommandTimeout > 5*time.Minute {
+			return cfg, errors.New("IPMI_COMMAND_TIMEOUT must be a positive duration of at most 5 minutes")
 		}
 	}
 
@@ -422,19 +435,10 @@ func newController(cfg Config) *Controller {
 	if cfg.AutoMode {
 		initial = float64(cfg.AutoModeFanSpeedMin + (cfg.AutoModeFanSpeedMax-cfg.AutoModeFanSpeedMin)/2)
 	}
-	allowed := 0
-	// CheckInterval must be known to calculate failures allowed
-	// If still 0 at this point, it will be calculated later
-	if cfg.CheckInterval > 0 && cfg.MaximumIPMIUnreachableDuration > 0 {
-		allowed = int(math.Ceil(float64(cfg.MaximumIPMIUnreachableDuration) / float64(cfg.CheckInterval)))
-		if allowed < 1 {
-			allowed = 1
-		}
-	}
 	return &Controller{
 		cfg:                 cfg,
 		pid:                 pidState{current: initial},
-		ipmiFailuresAllowed: allowed,
+		ipmiFailuresAllowed: cfg.ipmiFailureLimit(),
 		dashboard: dashboardState{
 			history: make([]dashboardSample, 0, cfg.DashboardSampleLimit),
 		},

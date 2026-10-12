@@ -48,6 +48,8 @@ type Config struct {
 
 	// Safety / misc
 	MaximumIPMIUnreachableDuration   time.Duration
+	MaximumConsecutiveIPMIFailures   int
+	IPMICommandTimeout               time.Duration
 	DisableThirdPartyPCIeCooling     bool
 	KeepThirdPartyCoolingStateOnExit bool
 	MonitoringOnlyMode               bool

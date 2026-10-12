@@ -1,6 +1,8 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math"
 	"os"
@@ -8,6 +10,25 @@ import (
 	"strings"
 	"time"
 )
+
+const defaultIPMICommandTimeout = 10 * time.Second
+
+var (
+	errIPMIUnreachable = errors.New("iDRAC unreachable for too long")
+	errFanControl      = errors.New("fan control command failed")
+)
+
+// ipmiFailureLimit is the single source of count/duration precedence, used both
+// before startup and after automatic polling cadence has been resolved.
+func (cfg Config) ipmiFailureLimit() int {
+	if cfg.MaximumConsecutiveIPMIFailures > 0 {
+		return cfg.MaximumConsecutiveIPMIFailures
+	}
+	if cfg.CheckInterval <= 0 || cfg.MaximumIPMIUnreachableDuration <= 0 {
+		return 0
+	}
+	return max(1, int(math.Ceil(float64(cfg.MaximumIPMIUnreachableDuration)/float64(cfg.CheckInterval))))
+}
 
 // detectLocalIPMIDevice finds and returns the path to the local IPMI device.
 func detectLocalIPMIDevice() (string, error) {
@@ -101,12 +122,7 @@ func (c *Controller) setupAutoIntervals() error {
 	}
 
 	// Recalculate IPMI failures allowed now that we know CHECK_INTERVAL
-	if c.cfg.MaximumIPMIUnreachableDuration > 0 {
-		c.ipmiFailuresAllowed = int(math.Ceil(float64(c.cfg.MaximumIPMIUnreachableDuration) / float64(c.cfg.CheckInterval)))
-		if c.ipmiFailuresAllowed < 1 {
-			c.ipmiFailuresAllowed = 1
-		}
-	}
+	c.ipmiFailuresAllowed = c.cfg.ipmiFailureLimit()
 
 	fmt.Println()
 	return nil
@@ -120,14 +136,25 @@ func (c *Controller) runIPMI(args ...string) (string, error) {
 	} else {
 		base = []string{"-I", "open"}
 	}
-	cmd := exec.Command("ipmitool", append(base, args...)...)
+	timeout := c.cfg.IPMICommandTimeout
+	if timeout <= 0 {
+		timeout = defaultIPMICommandTimeout
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "ipmitool", append(base, args...)...)
+	// Also bound pipe cleanup if a descendant inherits command output handles.
+	cmd.WaitDelay = time.Second
 	cmd.Env = os.Environ()
 	if c.cfg.NetworkMode {
 		cmd.Env = append(cmd.Env, "IPMI_PASSWORD="+c.cfg.IDRACPassword)
 	}
 	out, err := cmd.CombinedOutput()
+	if ctx.Err() != nil {
+		return "", fmt.Errorf("ipmitool %s timed out after %s: %w", strings.Join(args, " "), timeout, ctx.Err())
+	}
 	if err != nil {
-		return "", fmt.Errorf("ipmitool %s: %s", strings.Join(args, " "), strings.TrimSpace(string(out)))
+		return "", fmt.Errorf("ipmitool %s: %s: %w", strings.Join(args, " "), strings.TrimSpace(string(out)), err)
 	}
 	return strings.TrimSpace(string(out)), nil
 }
@@ -189,6 +216,15 @@ func (c *Controller) applyManualSpeed(speed int) error {
 	return err
 }
 
+// recordIPMIRecovery is called only after a complete temperature read or an
+// observed powered-off state, never after a partial power-status success.
+func (c *Controller) recordIPMIRecovery() {
+	if c.ipmiFailures > 0 {
+		fmt.Fprintf(os.Stderr, "IPMI monitoring recovered after %d failed checks\n", c.ipmiFailures)
+	}
+	c.ipmiFailures = 0
+}
+
 // recordIPMIFailure increments the failure counter and returns true if limit reached.
 func (c *Controller) recordIPMIFailure() bool {
 	c.ipmiFailures++
@@ -210,25 +246,28 @@ func (c *Controller) setFansToMaxSpeed() error {
 // reason is logged to indicate why the exit occurred (signal, panic, error).
 func (c *Controller) safetyExit(reason string) {
 	fmt.Fprintf(os.Stderr, "Safety exit triggered by %s.\n", reason)
+	if c.cfg.MonitoringOnlyMode {
+		fmt.Fprintln(os.Stderr, "Monitoring-only shutdown: no fan commands sent")
+		os.Exit(1)
+	}
 
 	// Try to set fans to max, but don't fail if IPMI is unreachable
-	if err := c.setFansToMaxSpeed(); err != nil {
+	if err := c.restoreSafeCooling(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Could not set fans to 100%%: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Ensure manual fan control or reboot the server to restore iDRAC automatic cooling.\n")
 	} else {
 		fmt.Fprintf(os.Stderr, "Fans set to 100%% for emergency cooling.\n")
 	}
 
-	// If configured to keep third-party cooling state, restore it
-	if c.cfg.KeepThirdPartyCoolingStateOnExit {
-		if err := c.applyDellDefault(); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: Could not restore Dell default cooling: %v\n", err)
-		} else {
-			fmt.Fprintf(os.Stderr, "Dell default cooling restored.\n")
-		}
-	}
-
 	os.Exit(1)
+}
+
+// Shutdown policy is independently testable and respects the read-only contract.
+func (c *Controller) restoreSafeCooling() error {
+	if c.cfg.MonitoringOnlyMode {
+		return nil
+	}
+	return c.setFansToMaxSpeed()
 }
 
 // ────────────────────── helpers ───────────────────────────────

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -23,7 +24,7 @@ func main() {
 	signal.Notify(sigChan, syscall.SIGTERM, syscall.SIGINT)
 	go func() {
 		sig := <-sigChan
-		fmt.Fprintf(os.Stderr, "\n%s  Received signal: %v. Setting fans to 100%% for safety...\n",
+		fmt.Fprintf(os.Stderr, "\n%s  Received signal: %v. Starting safe shutdown...\n",
 			time.Now().Format("02-01-2006 15:04:05"), sig)
 		c.safetyExit("signal")
 	}()
@@ -31,14 +32,14 @@ func main() {
 	// Set up panic recovery
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Fprintf(os.Stderr, "%s  PANIC: %v. Setting fans to 100%% for safety...\n",
+			fmt.Fprintf(os.Stderr, "%s  PANIC: %v. Starting safe shutdown...\n",
 				time.Now().Format("02-01-2006 15:04:05"), r)
 			c.safetyExit("panic")
 		}
 	}()
 
 	if err := c.run(); err != nil {
-		fmt.Fprintf(os.Stderr, "%s  Fatal error: %v. Setting fans to 100%% for safety...\n",
+		fmt.Fprintf(os.Stderr, "%s  Fatal error: %v. Starting safe shutdown...\n",
 			time.Now().Format("02-01-2006 15:04:05"), err)
 		c.safetyExit("error")
 		os.Exit(1)
@@ -70,10 +71,18 @@ func (c *Controller) run() error {
 	if c.cfg.DashboardEnabled {
 		c.startDashboard()
 	}
+	return c.controlLoop()
+}
 
+// controlLoop owns pacing and error policy; run owns startup. Fatal failures
+// must reach main's safety shutdown rather than being logged and retried forever.
+func (c *Controller) controlLoop() error {
 	for {
 		start := time.Now()
 		if err := c.cycle(); err != nil {
+			if errors.Is(err, errIPMIUnreachable) || errors.Is(err, errFanControl) {
+				return err
+			}
 			fmt.Fprintf(os.Stderr, "%s  error: %v\n",
 				time.Now().Format("02-01-2006 15:04:05"), err)
 		}
@@ -92,14 +101,14 @@ func (c *Controller) cycle() error {
 		power, err := c.chassisPowerState()
 		if err != nil {
 			if c.recordIPMIFailure() {
-				return fmt.Errorf("iDRAC unreachable for too long")
+				return fmt.Errorf("%w: %v", errIPMIUnreachable, err)
 			}
 			fmt.Fprintf(os.Stderr, "%s  IPMI unreachable (%d/%d): %v\n",
 				time.Now().Format("02-01-2006 15:04:05"), c.ipmiFailures, c.ipmiFailuresAllowed, err)
 			return nil
 		}
-		c.ipmiFailures = 0
 		if strings.Contains(power, "is off") {
+			c.recordIPMIRecovery()
 			fmt.Printf("%s  Target server is powered off\n",
 				time.Now().Format("02-01-2006 15:04:05"))
 			return nil
@@ -110,11 +119,11 @@ func (c *Controller) cycle() error {
 	snap, err := c.readTemperatures()
 	if err != nil {
 		if c.recordIPMIFailure() {
-			return fmt.Errorf("iDRAC unreachable for too long")
+			return fmt.Errorf("%w: %v", errIPMIUnreachable, err)
 		}
 		return err
 	}
-	c.ipmiFailures = 0
+	c.recordIPMIRecovery()
 
 	// Choose the hottest control source.
 	rawMax, cpuLabel, hasCPU := maxTemp(snap.cpuTemps)
@@ -163,7 +172,7 @@ func (c *Controller) cycle() error {
 		// Safety bypasses PID, trend floors, normal ramping and user duty caps.
 		c.logCriticalTransition(emergency, true)
 		if err := c.setFansToMaxSpeed(); err != nil {
-			return fmt.Errorf("critical temperature cooling failed: %w", err)
+			return fmt.Errorf("%w: critical temperature cooling: %w", errFanControl, err)
 		}
 		c.pid.current, c.pid.integral = 100, 0
 		appliedFan = 100
@@ -182,7 +191,7 @@ func (c *Controller) cycle() error {
 		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(speed); err != nil {
-				return err
+				return fmt.Errorf("%w: %w", errFanControl, err)
 			}
 		}
 		profile = fmt.Sprintf("PID Auto Mode (%d%%)", speed)
@@ -218,7 +227,7 @@ func (c *Controller) cycle() error {
 	case hasCPU && rawMax <= c.cfg.CPUTemperatureThreshold && !(snap.gpu != nil && *snap.gpu > c.cfg.GPUTemperatureThreshold):
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyManualSpeed(c.cfg.FanSpeed); err != nil {
-				return err
+				return fmt.Errorf("%w: %w", errFanControl, err)
 			}
 		}
 		appliedFan = c.cfg.FanSpeed
@@ -228,7 +237,7 @@ func (c *Controller) cycle() error {
 	default:
 		if !c.cfg.MonitoringOnlyMode {
 			if err := c.applyDellDefault(); err != nil {
-				return err
+				return fmt.Errorf("%w: %w", errFanControl, err)
 			}
 		}
 		profile = "Dell default (safety)"

@@ -132,6 +132,15 @@ func (c *Controller) logStartup() {
 	fmt.Printf("Check interval       : %s\n", c.cfg.CheckInterval)
 	fmt.Printf("Apply interval       : %s\n", c.cfg.ApplyInterval)
 	fmt.Printf("Log interval         : %s\n", c.cfg.LogInterval)
+	fmt.Printf("IPMI command timeout : %s\n", c.cfg.IPMICommandTimeout)
+	if c.ipmiFailuresAllowed > 0 {
+		fmt.Printf("IPMI read escalation : exit after %d consecutive failed checks\n", c.ipmiFailuresAllowed)
+		if c.ipmiFailuresAllowed == 1 {
+			fmt.Fprintln(os.Stderr, "Warning: IPMI escalation will exit on the first failed check")
+		}
+	} else {
+		fmt.Println("IPMI read escalation : disabled (keep retrying)")
+	}
 	if c.cfg.VerboseCycleLogging {
 		fmt.Println("Logging mode         : cycle (verbose)")
 	} else {

@@ -65,7 +65,19 @@ func installIPMIMock(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
 	log := filepath.Join(dir, "commands")
-	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$MOCK_IPMI_LOG\"\ncase \"$*\" in\n*'sdr type temperature'*) printf '%s\\n' \"$MOCK_TEMPERATURE_OUTPUT\";;\n*'chassis power status'*) echo 'Chassis Power is on';;\nesac\n"
+	script := `#!/bin/sh
+printf '%s\n' "$*" >> "$MOCK_IPMI_LOG"
+case "$*" in
+	*'sdr type temperature'*)
+		if [ "$MOCK_IPMI_FAILURE" = temperature ]; then exit 1; fi
+		printf '%s\n' "$MOCK_TEMPERATURE_OUTPUT";;
+	*'chassis power status'*)
+		if [ "$MOCK_IPMI_FAILURE" = power ]; then exit 1; fi
+		echo "Chassis Power is ${MOCK_POWER_STATE:-on}";;
+	*'raw 0x30'*)
+		if [ "$MOCK_IPMI_FAILURE" = control ]; then exit 1; fi;;
+esac
+`
 	if err := os.WriteFile(filepath.Join(dir, "ipmitool"), []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
