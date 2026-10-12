@@ -105,6 +105,7 @@ type Controller struct {
 	prevSmoothed        float64
 	hasPrevSmoothed     bool
 	trend               trendState
+	adaptive            adaptiveState
 	ipmiFailures        int
 	ipmiFailuresAllowed int
 	statsMu             sync.RWMutex
@@ -144,6 +145,8 @@ type cycleSample struct {
 	learnedBaseline float64
 	baselineReady   bool
 	baselineFloor   int
+	adaptiveFloor   int
+	adaptiveUntil   int64
 	fanRPMMin       *int
 	fanRPMMax       *int
 }
@@ -183,6 +186,8 @@ type dashboardSample struct {
 	LearnedBaseline float64 `json:"learned_baseline"`
 	BaselineReady   bool    `json:"baseline_ready"`
 	BaselineFloor   int     `json:"baseline_floor"`
+	AdaptiveFloor   int     `json:"adaptive_floor"`
+	AdaptiveUntil   int64   `json:"adaptive_until"`
 	FanRPMMin       *int    `json:"fan_rpm_min,omitempty"`
 	FanRPMMax       *int    `json:"fan_rpm_max,omitempty"`
 }

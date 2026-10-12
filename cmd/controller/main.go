@@ -145,6 +145,8 @@ func (c *Controller) cycle() error {
 	profile := "-"
 	comment := "-"
 	appliedFan := c.safeRound(c.pid.current)
+	adaptiveFloor := 0
+	adaptiveUntil := int64(0)
 
 	switch {
 	case c.cfg.MonitoringOnlyMode:
@@ -153,6 +155,11 @@ func (c *Controller) cycle() error {
 
 	case c.cfg.AutoMode && controlLabel != "":
 		prevFan := c.safeRound(c.pid.current)
+		previousFloor := c.adaptive.floor
+		adaptiveFloor = c.recordAdaptiveFloor(sampleTimestamp, smoothed, target, controlLabel, c.pid.current)
+		if adaptiveFloor > 0 {
+			adaptiveUntil = c.adaptive.expires.Unix()
+		}
 		speed, roc := c.automaticFanStep(smoothed, float64(controlRaw), float64(controlThreshold), trend)
 		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
@@ -183,6 +190,12 @@ func (c *Controller) cycle() error {
 		default:
 			comment = fmt.Sprintf("Optimal: %s EMA=%.1f°C target %.0f°C, %d%%",
 				controlLabel, smoothed, target, speed)
+		}
+		if adaptiveFloor > 0 {
+			comment += fmt.Sprintf("; adaptive minimum %d%% (oscillation), expires %s",
+				adaptiveFloor, c.adaptive.expires.Format("15:04:05"))
+		} else if previousFloor > 0 {
+			comment += "; adaptive minimum released"
 		}
 	case hasCPU && rawMax <= c.cfg.CPUTemperatureThreshold && !(snap.gpu != nil && *snap.gpu > c.cfg.GPUTemperatureThreshold):
 		if !c.cfg.MonitoringOnlyMode {
@@ -228,6 +241,8 @@ func (c *Controller) cycle() error {
 		learnedBaseline: trend.learnedBaseline,
 		baselineReady:   trend.baselineReady,
 		baselineFloor:   trend.baselineFloor,
+		adaptiveFloor:   adaptiveFloor,
+		adaptiveUntil:   adaptiveUntil,
 		fanRPMMin:       snap.fanRPMMin,
 		fanRPMMax:       snap.fanRPMMax,
 	}

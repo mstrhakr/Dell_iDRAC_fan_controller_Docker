@@ -29,6 +29,7 @@ func (c *Controller) appendDashboardSample(sample cycleSample) {
 		BaselineReady:   sample.baselineReady,
 		BaselineFloor:   sample.baselineFloor,
 	}
+	point.AdaptiveFloor, point.AdaptiveUntil = sample.adaptiveFloor, sample.adaptiveUntil
 
 	c.dashboard.current = point
 	c.dashboard.history = append(c.dashboard.history, point)
@@ -269,7 +270,8 @@ async function refresh() {
     ' trend_30/60/90=' + now.trend_30.toFixed(1) + '/' + now.trend_60.toFixed(1) + '/' + now.trend_90.toFixed(1) + 'C' +
     ' startup_baseline=' + now.startup_baseline.toFixed(1) + 'C' +
     (now.baseline_ready ? ' learned_baseline=' + now.learned_baseline.toFixed(1) + 'C floor=' + now.baseline_floor + '%' : ' learned_baseline=waiting') +
-    (now.trend_boost ? ' trend_boost=+' + now.trend_boost + '%' : '');
+    (now.trend_boost ? ' trend_boost=+' + now.trend_boost + '%' : '') +
+    (now.adaptive_floor ? ' adaptive_min=' + now.adaptive_floor + '% expires=' + new Date(now.adaptive_until * 1000).toLocaleTimeString() : '');
   document.getElementById('status').textContent = now.ts ? ('Live telemetry | latest sample ' + new Date(now.ts * 1000).toLocaleTimeString()) : 'Waiting for telemetry';
 }
 

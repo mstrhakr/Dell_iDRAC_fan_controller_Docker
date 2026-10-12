@@ -67,6 +67,7 @@ func (c *Controller) automaticFanStep(smoothedTemp, rawTemp, threshold float64, 
 	if trend.boost > 0 && next >= c.pid.current && next < trendBoostFanCeiling {
 		next = math.Min(next+float64(trend.boost), trendBoostFanCeiling)
 	}
+	next = math.Max(next, float64(c.adaptive.floor))
 
 	interval := c.cfg.CheckInterval.Seconds()
 	if interval <= 0 {
