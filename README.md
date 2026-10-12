@@ -385,7 +385,7 @@ The controller's unit tests need no Dell hardware, iDRAC or network:
 go test ./...
 ```
 
-The [`CI`](.github/workflows/ci.yml) workflow runs Go tests and vet, cross-compiles the amd64 controller, and builds the Docker image on pushes to master and pull requests. Run release-helper tests separately as described in [`tests/README.md`](./tests/README.md).
+The [`CI`](.github/workflows/ci.yml) workflow runs Go tests and vet, cross-compiles the amd64 controller, and builds the Docker image on pushes to master and pull requests. Controller tests live beside the Go implementation and need no Dell hardware.
 
 <p align="right">(<a href="#top">back to top</a>)</p>
 

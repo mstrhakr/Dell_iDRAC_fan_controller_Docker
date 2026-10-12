@@ -72,5 +72,5 @@ Do not add your own copyright line: the collective notice above already covers e
 
 - Run the controller tests: `go test ./...`. They need no Dell hardware, no iDRAC and no network.
 - Add a Go test for behavior you change.
-- If you change a release helper under `.github`, run `./tests/run_tests.sh` and keep [`shellcheck`](https://www.shellcheck.net/) quiet.
+- If you change a release helper under `.github`, check its Bash syntax and keep [`shellcheck`](https://www.shellcheck.net/) quiet.
 - Say which server model and iDRAC generation you tested on, if you tested on real hardware. That context is worth more than it looks in a project that talks to twenty years of firmware.

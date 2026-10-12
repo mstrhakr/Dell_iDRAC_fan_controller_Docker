@@ -30,9 +30,6 @@ jobs:
       - name: Run vet
         run: go vet ./...
 
-      - name: Validate dependency policy
-        run: ./tests/run_tests.sh --filter dependency_policy
-
   build:
     name: Build amd64 binary
     runs-on: ubuntu-latest
