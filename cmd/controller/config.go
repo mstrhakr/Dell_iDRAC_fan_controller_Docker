@@ -144,6 +144,22 @@ func loadConfig() (Config, error) {
 	if err != nil {
 		return cfg, fmt.Errorf("GPU_TEMPERATURE_THRESHOLD: %w", err)
 	}
+	for _, setting := range []struct {
+		name      string
+		threshold int
+		dest      *int
+	}{
+		{"CPU_CRITICAL_TEMPERATURE", cfg.CPUTemperatureThreshold, &cfg.CPUCriticalTemperature},
+		{"GPU_CRITICAL_TEMPERATURE", cfg.GPUTemperatureThreshold, &cfg.GPUCriticalTemperature},
+	} {
+		*setting.dest = defaultCriticalTemperature(setting.threshold)
+		if value, ok := optionalEnv(setting.name); ok {
+			*setting.dest, err = parsePositiveIntInRange(value, setting.threshold, 125)
+			if err != nil {
+				return cfg, fmt.Errorf("%s: %w", setting.name, err)
+			}
+		}
+	}
 
 	// PID gains
 	if value, ok := optionalEnv("PID_GAIN_PROPORTIONAL"); ok {

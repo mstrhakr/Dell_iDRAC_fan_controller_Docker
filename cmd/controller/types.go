@@ -21,8 +21,10 @@ type Config struct {
 
 	// Threshold / target
 	CPUTemperatureThreshold int
+	CPUCriticalTemperature  int
 	GPUTemperatureSource    string
 	GPUTemperatureThreshold int
+	GPUCriticalTemperature  int
 
 	// PID tuning
 	FanProfile                string
@@ -109,6 +111,7 @@ type Controller struct {
 	controlGroup        string
 	controlThreshold    int
 	lastControlSample   time.Time
+	criticalActive      bool
 	ipmiFailures        int
 	ipmiFailuresAllowed int
 	statsMu             sync.RWMutex

@@ -3,7 +3,23 @@ package main
 import (
 	"fmt"
 	"math"
+	"os"
 )
+
+// Critical transitions are emitted immediately, even with summary logging.
+// Repeated critical samples still command cooling without flooding the log.
+func (c *Controller) logCriticalTransition(emergency thermalEmergency, active bool) {
+	if active == c.criticalActive {
+		return
+	}
+	c.criticalActive = active
+	if active {
+		fmt.Fprintf(os.Stderr, "CRITICAL: %s raw=%dC >= %dC; requesting immediate 100%% cooling\n",
+			emergency.source, emergency.raw, emergency.limit)
+	} else {
+		fmt.Fprintln(os.Stderr, "Critical temperature cleared; returning to normal fan control")
+	}
+}
 
 func (c *Controller) initWindow(sample cycleSample) {
 	c.window = logWindow{
@@ -98,6 +114,8 @@ func (c *Controller) recordSample(sample cycleSample) {
 
 func (c *Controller) logStartup() {
 	fmt.Printf("Fan profile          : %s\n", c.cfg.FanProfile)
+	fmt.Printf("Critical cooling     : CPU >= %dC, GPU >= %dC -> immediate 100%% (not hardware-detected)\n",
+		c.cfg.CPUCriticalTemperature, c.cfg.GPUCriticalTemperature)
 	if c.cfg.AutoMode {
 		target := c.cfg.CPUTemperatureThreshold - c.cfg.AutoModeTemperatureMargin
 		fmt.Println("Fan control mode     : AUTO (Go PID controller)")

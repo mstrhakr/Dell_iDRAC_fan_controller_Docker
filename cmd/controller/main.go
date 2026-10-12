@@ -149,11 +149,27 @@ func (c *Controller) cycle() error {
 	appliedFan := c.safeRound(c.pid.current)
 	adaptiveFloor := 0
 	adaptiveUntil := int64(0)
+	emergency, critical := c.cfg.temperatureEmergency(snap)
+	if !critical && !c.cfg.MonitoringOnlyMode {
+		c.logCriticalTransition(emergency, false)
+	}
 
 	switch {
 	case c.cfg.MonitoringOnlyMode:
 		profile = "monitoring-only"
 		comment = "No fan control (monitoring only mode)"
+
+	case critical:
+		// Safety bypasses PID, trend floors, normal ramping and user duty caps.
+		c.logCriticalTransition(emergency, true)
+		if err := c.setFansToMaxSpeed(); err != nil {
+			return fmt.Errorf("critical temperature cooling failed: %w", err)
+		}
+		c.pid.current, c.pid.integral = 100, 0
+		appliedFan = 100
+		profile = "Critical temperature (100%)"
+		comment = fmt.Sprintf("CRITICAL: %s raw=%d°C >= %d°C limit, immediate 100%% cooling",
+			emergency.source, emergency.raw, emergency.limit)
 
 	case c.cfg.AutoMode && controlLabel != "":
 		prevFan := c.safeRound(c.pid.current)
