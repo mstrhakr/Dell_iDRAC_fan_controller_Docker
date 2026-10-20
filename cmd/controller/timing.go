@@ -35,7 +35,11 @@ func (c *Controller) sampleElapsed(timestamp time.Time) time.Duration {
 		if actual > 0 && actual <= observationGapLimit(c.cfg.CheckInterval) {
 			elapsed = actual
 		} else {
+			adaptive := c.adaptive
 			c.resetThermalEvidence()
+			if adaptive.floor > 0 {
+				c.adaptive = adaptiveState{floor: adaptive.floor, source: adaptive.source, target: adaptive.target}
+			}
 		}
 	}
 	c.lastControlSample = timestamp

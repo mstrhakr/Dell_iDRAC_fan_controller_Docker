@@ -68,9 +68,9 @@ func TestActualSampleElapsedAndBlindGapReset(t *testing.T) {
 	if c.sampleElapsed(start.Add(8*time.Second)) != 8*time.Second {
 		t.Fatal("actual polling delay was ignored")
 	}
-	c.adaptive.floor = 20
+	c.adaptive = adaptiveState{floor: 20, source: "CPU", target: 65, cycleStart: start.Add(time.Minute)}
 	c.pid.integral = 20
-	if c.sampleElapsed(start.Add(3*time.Minute)) != 5*time.Second || c.adaptive.floor != 0 || c.pid.integral != 0 {
+	if c.sampleElapsed(start.Add(3*time.Minute)) != 5*time.Second || c.adaptive.floor != 20 || c.pid.integral != 0 || !c.adaptive.cycleStart.IsZero() {
 		t.Fatal("blind period was integrated instead of resetting evidence")
 	}
 }

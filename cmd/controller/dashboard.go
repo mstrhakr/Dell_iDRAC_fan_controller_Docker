@@ -1,12 +1,19 @@
 package main
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"os"
 	"time"
 )
+
+//go:embed dashboard.css
+var dashboardCSS string
+
+//go:embed dashboard.js
+var dashboardJS string
 
 func (c *Controller) appendDashboardSample(sample cycleSample) {
 	point := dashboardSample{
@@ -29,7 +36,7 @@ func (c *Controller) appendDashboardSample(sample cycleSample) {
 		BaselineReady:   sample.baselineReady,
 		BaselineFloor:   sample.baselineFloor,
 	}
-	point.AdaptiveFloor, point.AdaptiveUntil = sample.adaptiveFloor, sample.adaptiveUntil
+	point.AdaptiveFloor = sample.adaptiveFloor
 
 	c.dashboard.current = point
 	c.dashboard.history = append(c.dashboard.history, point)
@@ -38,7 +45,15 @@ func (c *Controller) appendDashboardSample(sample cycleSample) {
 	}
 }
 
-func (c *Controller) dashboardStatsHandler(w http.ResponseWriter, _ *http.Request) {
+func (c *Controller) dashboardStatsHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		w.Header().Set("Allow", "GET")
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	c.cfgMu.RLock()
+	cfg := c.cfg
+	c.cfgMu.RUnlock()
 	c.statsMu.RLock()
 	history := make([]dashboardSample, len(c.dashboard.history))
 	copy(history, c.dashboard.history)
@@ -62,24 +77,41 @@ func (c *Controller) dashboardStatsHandler(w http.ResponseWriter, _ *http.Reques
 	}{
 		Now:                  current,
 		History:              history,
-		CheckIntervalSec:     c.cfg.CheckInterval.Seconds(),
-		LogIntervalSec:       c.cfg.LogInterval.Seconds(),
-		TargetTemperature:    c.cfg.CPUTemperatureThreshold - c.cfg.AutoModeTemperatureMargin,
-		ThresholdTemperature: c.cfg.CPUTemperatureThreshold,
-		AutoMode:             c.cfg.AutoMode,
-		FanProfile:           c.cfg.FanProfile,
-		PIDKp:                c.cfg.PIDKp,
-		PIDKi:                c.cfg.PIDKi,
-		PIDKd:                c.cfg.PIDKd,
-		Margin:               c.cfg.AutoModeTemperatureMargin,
-		RateBoost:            c.cfg.RateOfChangeBoostGain,
+		CheckIntervalSec:     cfg.CheckInterval.Seconds(),
+		LogIntervalSec:       cfg.LogInterval.Seconds(),
+		TargetTemperature:    cfg.CPUTemperatureThreshold - cfg.AutoModeTemperatureMargin,
+		ThresholdTemperature: cfg.CPUTemperatureThreshold,
+		AutoMode:             cfg.AutoMode,
+		FanProfile:           cfg.FanProfile,
+		PIDKp:                cfg.PIDKp,
+		PIDKi:                cfg.PIDKi,
+		PIDKd:                cfg.PIDKd,
+		Margin:               cfg.AutoModeTemperatureMargin,
+		RateBoost:            cfg.RateOfChangeBoostGain,
+	}
+	if current.Source == "GPU" {
+		resp.ThresholdTemperature = cfg.GPUTemperatureThreshold
+		resp.TargetTemperature = cfg.GPUTemperatureThreshold - cfg.AutoModeTemperatureMargin
 	}
 
 	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
-func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Request) {
+func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" {
+		http.NotFound(w, r)
+		return
+	}
+	if r.Method != http.MethodGet {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.Header().Set("Content-Security-Policy", "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'")
 	_, _ = w.Write([]byte(`<!doctype html>
 <html lang="en">
 <head>
@@ -121,10 +153,13 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     .facts b { display:block; color:var(--ink); font-size:15px; margin-top:4px; }
     @media (max-width:600px) { .header { align-items:flex-start; } .decision { grid-template-columns:1fr; } .facts { text-align:left; } .chart-header { display:block; } .legend { justify-content:flex-start; margin-top:10px; } }
   </style>
+  <link rel="stylesheet" href="/dashboard.css" />
 </head>
 <body>
 <div class="wrap">
-  <div class="header"><div><h2>Fan Controller</h2><p class="status" id="status">Waiting for telemetry</p></div><button id="themeToggle" type="button">Dark mode</button></div>
+  <div class="header"><div><div class="eyebrow">DELL iDRAC / THERMAL CONTROL</div><h2>Fan Controller</h2><p class="status" id="status" role="status">Waiting for telemetry</p></div><div class="header-actions"><span id="connection" class="badge">Connecting</span><button id="themeToggle" type="button">Dark mode</button></div></div>
+  <nav class="tabs" aria-label="Dashboard views"><button id="overviewTab" type="button" aria-pressed="true">Overview</button><button id="settingsTab" type="button" aria-pressed="false">Settings</button></nav>
+  <section id="overviewPanel" aria-label="Live telemetry">
   <div class="grid">
     <div class="card"><div class="label">Current Raw Temp</div><div id="raw" class="value">-</div></div>
     <div class="card"><div class="label">Current EMA Temp</div><div id="ema" class="value">-</div></div>
@@ -133,28 +168,39 @@ func (c *Controller) dashboardIndexHandler(w http.ResponseWriter, _ *http.Reques
     <div class="card"><div class="label">Measured Fan RPM</div><div id="rpm" class="value">-</div><div id="rpmDetail" class="status">Refreshed with the summary window</div></div>
   </div>
   <div class="card decision"><div><div class="label">Current decision</div><strong id="profile">Waiting for first sample</strong><p class="decision-note" id="note">The controller will publish its latest fan decision here.</p></div><div class="facts"><span>Profile<b id="fanProfile">--</b></span><span>Target<b id="target">-</b></span><span>Threshold<b id="threshold">-</b></span><span>Samples<b id="samples">0</b></span></div></div>
+  <div class="insights"><div class="card"><div class="label">Thermal trend · 30 / 60 / 90s</div><div id="trendInsight" class="insight-value">—</div></div><div class="card"><div class="label">Learned cooling floor</div><div id="floorInsight" class="insight-value">Learning idle baseline</div></div><div class="card"><div class="label">Inlet temperature</div><div id="inletInsight" class="insight-value">—</div></div></div>
+  <div class="history-controls"><h3>Thermal history</h3><label>Time range <select id="historyRange"><option value="300">Last 5 minutes</option><option value="900">Last 15 minutes</option><option value="3600">Last hour</option><option value="0" selected>All retained samples</option></select></label></div>
   <div class="chart">
     <div class="chart-header"><div><div class="title">Temperature history</div><div id="tempSummary" class="chart-summary">Waiting for samples</div></div><div class="legend"><span><i class="swatch"></i>Raw IPMI</span><span><i class="swatch ema"></i>EMA</span><span><i class="swatch target"></i>Target</span></div></div>
-    <svg id="tempChart" viewBox="0 0 1000 220"></svg>
+    <svg id="tempChart" viewBox="0 0 1000 220" role="img" aria-label="Raw and smoothed temperature history"></svg>
   </div>
   <div class="chart">
     <div class="chart-header"><div><div class="title">Fan command history</div><div id="fanSummary" class="chart-summary">Waiting for samples</div></div><div class="legend"><span><i class="swatch rpm"></i>Requested duty cycle</span></div></div>
-    <svg id="fanChart" viewBox="0 0 1000 220"></svg>
+    <svg id="fanChart" viewBox="0 0 1000 220" role="img" aria-label="Requested fan duty history"></svg>
   </div>
   <div class="chart">
     <div class="chart-header"><div><div class="title">Measured fan RPM history</div><div id="rpmSummary" class="chart-summary">RPM is refreshed at the log interval</div></div><div class="legend"><span><i class="swatch"></i>Lowest fan</span><span><i class="swatch rpm"></i>Highest fan</span></div></div>
-    <svg id="rpmChart" viewBox="0 0 1000 220"></svg>
+    <svg id="rpmChart" viewBox="0 0 1000 220" role="img" aria-label="Measured fan RPM history"></svg>
   </div>
   <div id="meta" class="footer"></div>
+  </section>
+  <section id="settingsPanel" aria-label="Controller settings" hidden>
+    <div class="settings-heading"><div><h3>Controller settings</h3><p>Live tuning, safety limits and connection settings — in one place.</p></div><button id="reloadSettings" type="button">Reload settings</button></div>
+    <div class="notice">Choose limits below your hardware specifications. Monitoring-only mode sends no fan commands, even at critical temperatures; otherwise, critical temperatures command 100% fan duty. Connection and listener changes require a container restart. Legacy PCIe compatibility flags have no effect and are not adjustable.</div>
+    <div id="settingsMessage" class="notice" role="status" aria-live="polite">Loading settings…</div>
+    <div class="settings-tools"><label>Find setting<input id="settingsSearch" type="search" placeholder="Search labels or environment variables" /></label><label>Preset<select id="presetChoice"><option>balanced</option><option>quiet</option><option>performance</option><option>manual</option></select></label><button id="applyPreset" type="button">Apply preset to form</button></div>
+    <form id="settingsForm"><div id="settingsFields"></div><div class="save-bar"><span id="dirtyStatus">No unsaved changes</span><div><button id="discardSettings" type="button" disabled>Discard</button><button id="saveSettings" type="submit" class="primary" disabled>Save settings</button></div></div></form>
+  </section>
 </div>
 <div id="tooltip" class="tooltip"></div>
 <script>
 const root = document.documentElement;
-const storedTheme = localStorage.getItem('idrac-theme');
+let storedTheme;
+try { storedTheme = localStorage.getItem('idrac-theme'); } catch (_) {}
 root.dataset.theme = storedTheme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
 const themeButton = document.getElementById('themeToggle');
 function labelTheme() { themeButton.textContent = root.dataset.theme === 'dark' ? 'Light mode' : 'Dark mode'; }
-themeButton.onclick = function () { root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'; localStorage.setItem('idrac-theme', root.dataset.theme); labelTheme(); };
+themeButton.onclick = function () { root.dataset.theme = root.dataset.theme === 'dark' ? 'light' : 'dark'; try { localStorage.setItem('idrac-theme', root.dataset.theme); } catch (_) {} labelTheme(); };
 labelTheme();
 function drawSeries(svg, series, color, yMin, yMax, plot) {
   if (!series.length) return;
@@ -185,15 +231,21 @@ function renderChart(svgId, samples, sets, colors, labels, minV, maxV, guides, f
       label.setAttribute("x", x); label.setAttribute("y", height - 9); label.setAttribute("fill", getComputedStyle(root).getPropertyValue('--muted').trim()); label.setAttribute("font-size", "10"); label.setAttribute("text-anchor", index === 0 ? "start" : (index === samples.length - 1 ? "end" : "middle")); label.textContent = new Date(samples[index].ts * 1000).toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); svg.appendChild(label);
     });
   }
-  (guides || []).forEach((guide) => {
-    if (!Number.isFinite(guide.value)) return;
-    const y = plot.top + (maxV - guide.value) / span * plot.height;
+  let lastGuideLabelY = -Infinity;
+  (guides || []).filter(guide => Number.isFinite(guide.value))
+    .map(guide => ({ guide, y:plot.top + (maxV - guide.value) / span * plot.height }))
+    .sort((a, b) => a.y - b.y)
+    .forEach(({ guide, y }) => {
     const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
     line.setAttribute("x1", plot.left); line.setAttribute("x2", plot.left + plot.width); line.setAttribute("y1", y); line.setAttribute("y2", y);
     line.setAttribute("stroke", guide.color); line.setAttribute("stroke-width", "1.5"); line.setAttribute("stroke-dasharray", "5 5");
     svg.appendChild(line);
     const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
-    label.setAttribute("x", plot.left + plot.width); label.setAttribute("y", y - 4); label.setAttribute("fill", guide.color); label.setAttribute("font-size", "11"); label.setAttribute("text-anchor", "end"); label.textContent = guide.label;
+    let labelY = Math.max(plot.top + 11, y - 4);
+    if (labelY - lastGuideLabelY < 14) labelY = lastGuideLabelY + 14;
+    labelY = Math.min(labelY, plot.top + plot.height);
+    lastGuideLabelY = labelY;
+    label.setAttribute("x", plot.left + plot.width); label.setAttribute("y", labelY); label.setAttribute("fill", guide.color); label.setAttribute("font-size", "11"); label.setAttribute("text-anchor", "end"); label.textContent = guide.label;
     svg.appendChild(label);
   });
   sets.forEach((s, i) => drawSeries(svg, s, colors[i], minV, maxV, plot));
@@ -215,10 +267,10 @@ function rangeLabel(values, suffix) {
 }
 
 async function refresh() {
-  const r = await fetch('/api/stats');
-  if (!r.ok) return;
+  const r = await fetch('/api/stats', { signal:AbortSignal.timeout(10000), cache:'no-store' });
+  if (!r.ok) throw new Error('Telemetry HTTP ' + r.status);
   const d = await r.json();
-  const now = d.now || {};
+  const now = d.now && d.now.ts ? d.now : {};
   document.getElementById('raw').textContent = Number.isFinite(now.raw) ? (now.raw + 'C') : '-';
   document.getElementById('ema').textContent = Number.isFinite(now.ema) ? (now.ema.toFixed(1) + 'C') : '-';
   document.getElementById('fan').textContent = Number.isFinite(now.fan) && now.fan >= 0 ? (now.fan + '%') : '-';
@@ -229,7 +281,9 @@ async function refresh() {
   document.getElementById('threshold').textContent = Number.isFinite(d.threshold_temperature) ? (d.threshold_temperature + 'C') : '-';
   document.getElementById('fanProfile').textContent = d.fan_profile || '--';
 
-  const h = Array.isArray(d.history) ? d.history : [];
+  const allHistory = Array.isArray(d.history) ? d.history : [];
+  const rangeSeconds = Number(document.getElementById('historyRange').value);
+  const h = rangeSeconds ? allHistory.filter(p => p.ts >= Date.now()/1000 - rangeSeconds) : allHistory;
   document.getElementById('samples').textContent = h.length;
   const rawSeries = h.map(p => Number.isFinite(p.raw) ? p.raw : null);
   const emaSeries = h.map(p => Number.isFinite(p.ema) ? p.ema : null);
@@ -257,27 +311,20 @@ async function refresh() {
   document.getElementById('fanSummary').textContent = 'Requested range ' + rangeLabel(fan, '%');
   document.getElementById('rpmSummary').textContent = rpmMin.length ? ('Measured range ' + Math.min(...rpmMin) + '–' + Math.max(...rpmMax) + ' RPM') : 'RPM is refreshed at the log interval';
 
-  document.getElementById('meta').textContent =
-    'samples=' + h.length +
-    ' check_interval=' + d.check_interval_sec + 's' +
-    ' log_interval=' + d.log_interval_sec + 's' +
-    ' profile=' + (now.profile || '-') +
-    ' mode=' + (d.auto_mode ? 'automatic' : 'static') +
-    ' profile=' + (d.fan_profile || '-') +
-    ' Kp/Ki/Kd=' + d.pid_kp + '/' + d.pid_ki + '/' + d.pid_kd +
-    ' margin=' + d.margin + 'C' +
-    ' rate_boost=' + d.rate_boost +
-    ' trend_30/60/90=' + now.trend_30.toFixed(1) + '/' + now.trend_60.toFixed(1) + '/' + now.trend_90.toFixed(1) + 'C' +
-    ' startup_baseline=' + now.startup_baseline.toFixed(1) + 'C' +
-    (now.baseline_ready ? ' learned_baseline=' + now.learned_baseline.toFixed(1) + 'C floor=' + now.baseline_floor + '%' : ' learned_baseline=waiting') +
-    (now.trend_boost ? ' trend_boost=+' + now.trend_boost + '%' : '') +
-    (now.adaptive_floor ? ' adaptive_min=' + now.adaptive_floor + '% expires=' + new Date(now.adaptive_until * 1000).toLocaleTimeString() : '');
+  document.getElementById('meta').textContent = 'Polling every ' + d.check_interval_sec + 's · RPM/summary every ' + d.log_interval_sec + 's · ' + allHistory.length + ' retained samples · PID ' + d.pid_kp + ' / ' + d.pid_ki + ' / ' + d.pid_kd;
   document.getElementById('status').textContent = now.ts ? ('Live telemetry | latest sample ' + new Date(now.ts * 1000).toLocaleTimeString()) : 'Waiting for telemetry';
+  window.dispatchEvent(new CustomEvent('telemetry', { detail:d }));
 }
 
-refresh();
-setInterval(refresh, 2000);
+async function pollTelemetry() {
+  try { await refresh(); } catch (error) {
+    document.getElementById('connection').textContent = 'Offline';
+    document.getElementById('connection').dataset.state = 'error';
+    document.getElementById('status').textContent = 'Telemetry unavailable. Retrying automatically; displayed values may be stale.';
+  } finally { setTimeout(pollTelemetry, 2000); }
+}
 </script>
+<script src="/dashboard.js"></script>
 </body>
 </html>`))
 }
@@ -286,6 +333,15 @@ func (c *Controller) startDashboard() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/", c.dashboardIndexHandler)
 	mux.HandleFunc("/api/stats", c.dashboardStatsHandler)
+	mux.HandleFunc("/api/settings", c.dashboardSettingsHandler)
+	mux.HandleFunc("/dashboard.css", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/css; charset=utf-8")
+		_, _ = w.Write([]byte(dashboardCSS))
+	})
+	mux.HandleFunc("/dashboard.js", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/javascript; charset=utf-8")
+		_, _ = w.Write([]byte(dashboardJS))
+	})
 
 	server := &http.Server{
 		Addr:              c.cfg.DashboardListenAddress,

@@ -245,14 +245,19 @@ func (c *Controller) setFansToMaxSpeed() error {
 // safetyExit attempts to set fans to 100% before exiting.
 // reason is logged to indicate why the exit occurred (signal, panic, error).
 func (c *Controller) safetyExit(reason string) {
+	// Use an immutable snapshot: a signal can arrive during a UI update.
+	c.cfgMu.RLock()
+	cfg := c.cfg
+	c.cfgMu.RUnlock()
+	shutdown := newController(cfg)
 	fmt.Fprintf(os.Stderr, "Safety exit triggered by %s.\n", reason)
-	if c.cfg.MonitoringOnlyMode {
+	if cfg.MonitoringOnlyMode {
 		fmt.Fprintln(os.Stderr, "Monitoring-only shutdown: no fan commands sent")
 		os.Exit(1)
 	}
 
 	// Try to set fans to max, but don't fail if IPMI is unreachable
-	if err := c.restoreSafeCooling(); err != nil {
+	if err := shutdown.restoreSafeCooling(); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: Could not set fans to 100%%: %v\n", err)
 		fmt.Fprintf(os.Stderr, "Ensure manual fan control or reboot the server to restore iDRAC automatic cooling.\n")
 	} else {

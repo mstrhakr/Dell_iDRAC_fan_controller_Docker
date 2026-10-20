@@ -8,118 +8,92 @@ import (
 	"time"
 )
 
-func feedAdaptiveSwings(c *Controller, start time.Time, count int, spacing time.Duration, low, high, span float64) time.Time {
+func feedAdaptiveCycles(c *Controller, start time.Time, count int, spacing time.Duration, floor, peak float64) time.Time {
+	var last time.Time
 	for i := 0; i < count; i++ {
-		fan, temp := low, 50.0
-		if i%2 != 0 {
-			fan, temp = high, 50+span
-		}
-		c.recordAdaptiveFloor(start.Add(time.Duration(i)*spacing), temp, 65, "CPU1", fan)
+		cycleStart := start.Add(time.Duration(i) * spacing)
+		last = cycleStart.Add(spacing / 2)
+		c.recordAdaptiveFloor(cycleStart, 65, "CPU1", peak)
+		c.recordAdaptiveFloor(last, 65, "CPU1", floor)
 	}
-	return start.Add(time.Duration(count-1) * spacing)
+	return last
 }
 
-func TestAdaptiveFloorRequiresRepeatedThermalSwings(t *testing.T) {
+func TestAdaptiveFloorLearnsFromOneHighDutyReturnCycle(t *testing.T) {
 	c := newTestController()
 	start := time.Unix(1000, 0)
-	feedAdaptiveSwings(c, start, 5, 30*time.Second, 20, 70, 10)
-	if c.adaptive.floor != 0 {
-		t.Fatalf("floor before four confirmed reversals = %d, want 0", c.adaptive.floor)
+	c.pid.current = 10
+	c.recordAdaptiveFloor(start, 65, "CPU1", 55)
+	if floor := c.recordAdaptiveFloor(start.Add(time.Minute), 65, "CPU1", 10); floor != 15 {
+		t.Fatalf("floor after high-duty return = %d, want 15", floor)
 	}
-	trigger := start.Add(150 * time.Second)
-	floor := c.recordAdaptiveFloor(trigger, 60, 65, "CPU1", 70)
-	if floor != 15 || !c.adaptive.expires.Equal(trigger.Add(adaptiveFloorTimeout)) {
-		t.Fatalf("adaptive state = %+v, want floor 15 and 15-minute expiry", c.adaptive)
+	for i := 0; i < 3; i++ {
+		c.automaticFanStep(60, 60, 65, trendState{})
+	}
+	if c.pid.current != 15 {
+		t.Fatalf("controller did not settle at learned floor: %g", c.pid.current)
+	}
+	for i := 0; i < 10; i++ {
+		c.automaticFanStep(60, 60, 65, trendState{})
+	}
+	if c.pid.current != 15 {
+		t.Fatalf("controller fell below persistent learned floor: %g", c.pid.current)
 	}
 }
 
-func TestAdaptiveFloorIgnoresNoiseSpikesAndMonotonicLoads(t *testing.T) {
+func TestAdaptiveFloorRejectsLowDutyAndExpiredCycles(t *testing.T) {
+	start := time.Unix(1000, 0)
 	for _, tc := range []struct {
-		name      string
-		low, high float64
-		span      float64
-		count     int
+		name string
+		peak float64
+		wait time.Duration
 	}{
-		{"small fan noise", 45, 50, 10, 20},
-		{"small temperature noise", 20, 70, 1, 20},
-		{"single load spike", 20, 70, 10, 3},
+		{"peak at or below 50 percent", 50, time.Minute},
+		{"return after five minutes", 55, 6 * time.Minute},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			c := newTestController()
-			feedAdaptiveSwings(c, time.Unix(1000, 0), tc.count, 30*time.Second, tc.low, tc.high, tc.span)
+			c.recordAdaptiveFloor(start, 65, "CPU1", tc.peak)
+			c.recordAdaptiveFloor(start.Add(tc.wait), 65, "CPU1", 10)
 			if c.adaptive.floor != 0 {
-				t.Fatalf("spurious floor %d", c.adaptive.floor)
+				t.Fatalf("non-qualifying cycle learned floor %d", c.adaptive.floor)
 			}
 		})
 	}
+}
+
+func TestAdaptiveFloorStepsUpAndRespectsConfiguredMaximum(t *testing.T) {
 	c := newTestController()
-	for i := 0; i < 80; i++ {
-		c.recordAdaptiveFloor(time.Unix(1000+int64(i)*5, 0), 40+float64(i)/2, 65, "CPU1", 20+float64(i))
-	}
-	if c.adaptive.floor != 0 {
-		t.Fatalf("monotonic heating raised floor to %d", c.adaptive.floor)
+	c.cfg.AutoModeFanSpeedMax = 23
+	feedAdaptiveCycles(c, time.Unix(1000, 0), 10, time.Minute, 10, 55)
+	if c.adaptive.floor != 23 {
+		t.Fatalf("learned floor = %d, want configured cap 23", c.adaptive.floor)
 	}
 }
 
-func TestAdaptiveFloorOnlyCountsRecentReversals(t *testing.T) {
+func TestAdaptiveFloorRequiresReturnNearFloor(t *testing.T) {
 	c := newTestController()
-	c.cfg.CheckInterval = 3 * time.Minute
-	feedAdaptiveSwings(c, time.Unix(1000, 0), 8, 4*time.Minute, 20, 70, 10)
-	if c.adaptive.floor != 0 {
-		t.Fatalf("reversals outside ten-minute window raised floor to %d", c.adaptive.floor)
+	start := time.Unix(1000, 0)
+	c.recordAdaptiveFloor(start, 65, "CPU1", 55)
+	if floor := c.recordAdaptiveFloor(start.Add(time.Minute), 65, "CPU1", 13); floor != 0 {
+		t.Fatalf("floor learned when duty returned 3 points above floor: %d", floor)
+	}
+	if floor := c.recordAdaptiveFloor(start.Add(2*time.Minute), 65, "CPU1", 12); floor != 15 {
+		t.Fatalf("floor did not learn when duty returned within 2 points: %d", floor)
 	}
 }
 
-func TestAdaptiveFloorIncreasesWithFreshCyclesAndRespectsCaps(t *testing.T) {
+func TestAdaptiveFloorPersistsWithoutNewOscillation(t *testing.T) {
 	c := newTestController()
-	trigger := feedAdaptiveSwings(c, time.Unix(1000, 0), 6, 30*time.Second, 20, 70, 10)
-	for i := 1; i <= 4; i++ {
-		fan, temp := 20.0, 50.0
-		if i%2 == 0 {
-			fan, temp = 70, 60
-		}
-		c.recordAdaptiveFloor(trigger.Add(time.Duration(i)*30*time.Second), temp, 65, "CPU1", fan)
-		if i < 4 && c.adaptive.floor != 15 {
-			t.Fatalf("renewed floor without four fresh reversals: %+v", c.adaptive)
+	trigger := feedAdaptiveCycles(c, time.Unix(1000, 0), 1, 2*time.Minute, 10, 55)
+	for elapsed := 30 * time.Second; elapsed < 30*time.Minute; elapsed += 30 * time.Second {
+		floor := c.recordAdaptiveFloor(trigger.Add(elapsed), 65, "CPU1", 15)
+		if floor != 15 {
+			t.Fatalf("stable samples changed learned floor: %+v", c.adaptive)
 		}
 	}
-	if c.adaptive.floor != 20 || !c.adaptive.expires.Equal(trigger.Add(2*time.Minute+adaptiveFloorTimeout)) {
-		t.Fatalf("fresh oscillation did not raise and renew floor: %+v", c.adaptive)
-	}
-	for _, maximum := range []int{100, 23, 10} {
-		c := newTestController()
-		c.cfg.AutoModeFanSpeedMax = maximum
-		feedAdaptiveSwings(c, time.Unix(1000, 0), 42, 30*time.Second, 20, 70, 10)
-		want := adaptiveMaximumFloor
-		if maximum < want {
-			want = maximum
-		}
-		if want == c.cfg.AutoModeFanSpeedMin {
-			want = 0 // No adaptive floor is needed when the allowed range is fixed.
-		}
-		if c.adaptive.floor != want {
-			t.Fatalf("maximum=%d: floor=%d, want %d", maximum, c.adaptive.floor, want)
-		}
-	}
-}
-
-func TestAdaptiveFloorExpiresWithoutRenewingOnStableSamples(t *testing.T) {
-	c := newTestController()
-	trigger := feedAdaptiveSwings(c, time.Unix(1000, 0), 6, 30*time.Second, 20, 70, 10)
-	expires := c.adaptive.expires
-	for elapsed := 30 * time.Second; elapsed < adaptiveFloorTimeout; elapsed += 30 * time.Second {
-		floor := c.recordAdaptiveFloor(trigger.Add(elapsed), 60, 65, "CPU1", 70)
-		if floor != 15 || !c.adaptive.expires.Equal(expires) {
-			t.Fatalf("stable samples renewed/changed floor: %+v", c.adaptive)
-		}
-	}
-	if floor := c.recordAdaptiveFloor(expires, 60, 65, "CPU1", 70); floor != 0 || !c.adaptive.expires.IsZero() {
-		t.Fatalf("floor failed to expire: %+v", c.adaptive)
-	}
-	for i := 1; i <= 60; i++ {
-		if floor := c.recordAdaptiveFloor(expires.Add(time.Duration(i)*5*time.Second), 60, 65, "CPU1", 70); floor != 0 {
-			t.Fatalf("stale history reactivated floor %d", floor)
-		}
+	if speed, _ := c.automaticFanStep(60, 60, 65, trendState{}); speed < 15 {
+		t.Fatalf("controller dropped below learned floor: %d", speed)
 	}
 }
 
@@ -127,7 +101,7 @@ func TestAdaptiveFloorResetsOnSourceTargetOrObservationGap(t *testing.T) {
 	for _, name := range []string{"source", "target", "gap"} {
 		t.Run(name, func(t *testing.T) {
 			c := newTestController()
-			trigger := feedAdaptiveSwings(c, time.Unix(1000, 0), 6, 30*time.Second, 20, 70, 10)
+			trigger := feedAdaptiveCycles(c, time.Unix(1000, 0), 1, 2*time.Minute, 10, 55)
 			source, target, elapsed := "CPU1", 65.0, 5*time.Second
 			switch name {
 			case "source":
@@ -137,7 +111,12 @@ func TestAdaptiveFloorResetsOnSourceTargetOrObservationGap(t *testing.T) {
 			case "gap":
 				elapsed = 2 * time.Minute
 			}
-			if floor := c.recordAdaptiveFloor(trigger.Add(elapsed), 60, target, source, 70); floor != 0 {
+			floor := c.recordAdaptiveFloor(trigger.Add(elapsed), target, source, 15)
+			if name == "gap" {
+				if floor != 15 || !c.adaptive.cycleStart.IsZero() {
+					t.Fatalf("gap lost learned floor or retained stale cycle: %+v", c.adaptive)
+				}
+			} else if floor != 0 {
 				t.Fatalf("%s did not reset adaptive floor: %+v", name, c.adaptive)
 			}
 		})
@@ -177,7 +156,6 @@ func TestAdaptiveFloorDashboardTelemetry(t *testing.T) {
 	c.appendDashboardSample(cycleSample{
 		timestamp:     time.Unix(1000, 0),
 		adaptiveFloor: 15,
-		adaptiveUntil: 1900,
 	})
 	response := httptest.NewRecorder()
 	c.dashboardStatsHandler(response, httptest.NewRequest("GET", "/api/stats", nil))
@@ -187,7 +165,7 @@ func TestAdaptiveFloorDashboardTelemetry(t *testing.T) {
 	if err := json.Unmarshal(response.Body.Bytes(), &payload); err != nil {
 		t.Fatal(err)
 	}
-	if payload.Now.AdaptiveFloor != 15 || payload.Now.AdaptiveUntil != 1900 {
+	if payload.Now.AdaptiveFloor != 15 {
 		t.Fatalf("dashboard adaptive state missing: %+v", payload.Now)
 	}
 }

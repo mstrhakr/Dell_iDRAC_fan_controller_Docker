@@ -68,6 +68,9 @@ func (c *Controller) run() error {
 	}
 
 	c.logStartup()
+	if err := c.initSettings(); err != nil {
+		return err
+	}
 	if c.cfg.DashboardEnabled {
 		c.startDashboard()
 	}
@@ -78,6 +81,9 @@ func (c *Controller) run() error {
 // must reach main's safety shutdown rather than being logged and retried forever.
 func (c *Controller) controlLoop() error {
 	for {
+		if err := c.applyPendingSettings(); err != nil {
+			return err
+		}
 		start := time.Now()
 		if err := c.cycle(); err != nil {
 			if errors.Is(err, errIPMIUnreachable) || errors.Is(err, errFanControl) {
@@ -157,7 +163,6 @@ func (c *Controller) cycle() error {
 	comment := "-"
 	appliedFan := c.safeRound(c.pid.current)
 	adaptiveFloor := 0
-	adaptiveUntil := int64(0)
 	emergency, critical := c.cfg.temperatureEmergency(snap)
 	if !critical && !c.cfg.MonitoringOnlyMode {
 		c.logCriticalTransition(emergency, false)
@@ -183,10 +188,7 @@ func (c *Controller) cycle() error {
 	case c.cfg.AutoMode && controlLabel != "":
 		prevFan := c.safeRound(c.pid.current)
 		previousFloor := c.adaptive.floor
-		adaptiveFloor = c.recordAdaptiveFloor(sampleTimestamp, smoothed, target, controlLabel, c.pid.current)
-		if adaptiveFloor > 0 {
-			adaptiveUntil = c.adaptive.expires.Unix()
-		}
+		adaptiveFloor = c.recordAdaptiveFloor(sampleTimestamp, target, controlLabel, c.pid.current)
 		speed, roc := c.automaticFanStepOverInterval(smoothed, float64(controlRaw), float64(controlThreshold), trend, elapsed)
 		appliedFan = speed
 		if !c.cfg.MonitoringOnlyMode {
@@ -219,8 +221,7 @@ func (c *Controller) cycle() error {
 				controlLabel, smoothed, target, speed)
 		}
 		if adaptiveFloor > 0 {
-			comment += fmt.Sprintf("; adaptive minimum %d%% (oscillation), expires %s",
-				adaptiveFloor, c.adaptive.expires.Format("15:04:05"))
+			comment += fmt.Sprintf("; learned minimum %d%% after high-duty cooling cycle", adaptiveFloor)
 		} else if previousFloor > 0 {
 			comment += "; adaptive minimum released"
 		}
@@ -273,7 +274,6 @@ func (c *Controller) cycle() error {
 		baselineReady:   trend.baselineReady,
 		baselineFloor:   trend.baselineFloor,
 		adaptiveFloor:   adaptiveFloor,
-		adaptiveUntil:   adaptiveUntil,
 		fanRPMMin:       snap.fanRPMMin,
 		fanRPMMax:       snap.fanRPMMax,
 	}

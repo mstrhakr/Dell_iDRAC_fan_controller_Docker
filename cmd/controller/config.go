@@ -53,10 +53,31 @@ func (p fanProfile) apply(cfg *Config) {
 
 // loadConfig parses environment variables and returns a Config struct.
 func loadConfig() (Config, error) {
+	overrides, err := readSettingsFile(settingsFilePath())
+	if err != nil {
+		return Config{}, err
+	}
+	return loadConfigFrom(settingsLookup(overrides))
+}
+
+// loadConfigFrom also validates UI changes without modifying process environment.
+func loadConfigFrom(lookup func(string) (string, bool)) (Config, error) {
+	getEnv := func(name string) string { value, _ := lookup(name); return value }
+	envOrDefault := func(name, fallback string) string {
+		if value := strings.TrimSpace(getEnv(name)); value != "" {
+			return value
+		}
+		return fallback
+	}
+	optionalEnv := func(name string) (string, bool) {
+		value, ok := lookup(name)
+		value = strings.TrimSpace(value)
+		return value, ok && value != ""
+	}
 	cfg := Config{
 		IDRACHost:                        envOrDefault("IDRAC_HOST", "local"),
-		IDRACUsername:                    os.Getenv("IDRAC_USERNAME"),
-		IDRACPassword:                    os.Getenv("IDRAC_PASSWORD"),
+		IDRACUsername:                    getEnv("IDRAC_USERNAME"),
+		IDRACPassword:                    getEnv("IDRAC_PASSWORD"),
 		FanSpeed:                         defaultMinimumFanSpeed,
 		CheckInterval:                    0, // Will be auto-calculated
 		ApplyInterval:                    0, // Will be auto-calculated
@@ -131,6 +152,12 @@ func loadConfig() (Config, error) {
 	}
 
 	// Automatic duty floor (independent of the static FAN_SPEED selection).
+	if value, ok := optionalEnv("AUTO_MODE_FAN_SPEED_MAX"); ok {
+		cfg.AutoModeFanSpeedMax, err = parsePositiveIntInRange(value, 1, 100)
+		if err != nil {
+			return cfg, fmt.Errorf("AUTO_MODE_FAN_SPEED_MAX: %w", err)
+		}
+	}
 	if value, ok := optionalEnv("AUTO_MODE_FAN_SPEED_MIN"); ok {
 		cfg.AutoModeFanSpeedMin, err = parsePositiveIntInRange(value, 1, cfg.AutoModeFanSpeedMax)
 		if err != nil {
@@ -192,6 +219,12 @@ func loadConfig() (Config, error) {
 	}
 
 	// PID margins and limits
+	if value, ok := optionalEnv("PID_INTEGRAL_LIMIT"); ok {
+		cfg.PIDIntegralLimit, err = parseFloat(value)
+		if err != nil || cfg.PIDIntegralLimit < 0 {
+			return cfg, errors.New("PID_INTEGRAL_LIMIT must be non-negative")
+		}
+	}
 	if value, ok := optionalEnv("AUTO_MODE_TEMPERATURE_MARGIN"); ok {
 		cfg.AutoModeTemperatureMargin, err = parsePositiveIntInRange(value, 0, 20)
 		if err != nil {
@@ -252,7 +285,7 @@ func loadConfig() (Config, error) {
 	}
 
 	// Check interval (optional override for testing; otherwise auto-calculated)
-	checkIntervalEnv := strings.TrimSpace(os.Getenv("CHECK_INTERVAL"))
+	checkIntervalEnv := strings.TrimSpace(getEnv("CHECK_INTERVAL"))
 	if checkIntervalEnv != "" {
 		checkInterval, err := parseInterval(checkIntervalEnv)
 		if err != nil {
@@ -265,7 +298,7 @@ func loadConfig() (Config, error) {
 	}
 
 	// Log interval (optional user override; otherwise auto-calculated as 5× CHECK_INTERVAL)
-	logIntervalEnv := strings.TrimSpace(os.Getenv("LOG_INTERVAL"))
+	logIntervalEnv := strings.TrimSpace(getEnv("LOG_INTERVAL"))
 	if logIntervalEnv != "" {
 		logInterval, err := parseInterval(logIntervalEnv)
 		if err != nil {
@@ -283,7 +316,7 @@ func loadConfig() (Config, error) {
 	}
 
 	// Maximum IPMI unreachable duration
-	maxIPMIUnreachable, configuredMaxIPMIUnreachable := os.LookupEnv("MAXIMUM_IPMI_UNREACHABLE_DURATION")
+	maxIPMIUnreachable, configuredMaxIPMIUnreachable := lookup("MAXIMUM_IPMI_UNREACHABLE_DURATION")
 	maxIPMIUnreachable = strings.TrimSpace(maxIPMIUnreachable)
 	if configuredMaxIPMIUnreachable && maxIPMIUnreachable == "" {
 		cfg.MaximumIPMIUnreachableDuration = 0
@@ -306,12 +339,12 @@ func loadConfig() (Config, error) {
 		}
 	}
 
-	dashboardListenAddress := strings.TrimSpace(os.Getenv("DASHBOARD_LISTEN_ADDRESS"))
+	dashboardListenAddress := strings.TrimSpace(getEnv("DASHBOARD_LISTEN_ADDRESS"))
 	if dashboardListenAddress != "" {
 		cfg.DashboardListenAddress = dashboardListenAddress
 	}
 
-	dashboardSampleLimit := strings.TrimSpace(os.Getenv("DASHBOARD_SAMPLE_LIMIT"))
+	dashboardSampleLimit := strings.TrimSpace(getEnv("DASHBOARD_SAMPLE_LIMIT"))
 	if dashboardSampleLimit != "" {
 		cfg.DashboardSampleLimit, err = parsePositiveIntInRange(dashboardSampleLimit, 30, 5000)
 		if err != nil {
@@ -391,8 +424,8 @@ func parsePositiveIntInRange(v string, min, max int) (int, error) {
 
 func parseFloat(v string) (float64, error) {
 	n, err := strconv.ParseFloat(strings.TrimSpace(v), 64)
-	if err != nil {
-		return 0, errors.New("must be a number")
+	if err != nil || math.IsNaN(n) || math.IsInf(n, 0) || n < 0 {
+		return 0, errors.New("must be a finite non-negative number")
 	}
 	return n, nil
 }

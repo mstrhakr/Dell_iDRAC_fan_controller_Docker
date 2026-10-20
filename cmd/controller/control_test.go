@@ -53,13 +53,13 @@ func TestControlDomainOrThresholdChangeReseedsThermalEvidence(t *testing.T) {
 func TestAdaptiveFloorLearnsAcrossAlternatingCPUSockets(t *testing.T) {
 	c := newTestController()
 	for i := 0; i < 6; i++ {
-		source, fan, temp := "CPU 1", 20.0, 50.0
+		source, fan := "CPU 1", 10.0
 		if i%2 != 0 {
-			source, fan, temp = "CPU 2", 70, 60
+			source, fan = "CPU 2", 70
 		}
-		c.recordAdaptiveFloor(time.Unix(1000+int64(i)*30, 0), temp, 65, source, fan)
+		c.recordAdaptiveFloor(time.Unix(1000+int64(i)*30, 0), 65, source, fan)
 	}
-	if c.adaptive.floor != 15 {
-		t.Fatalf("CPU swaps prevented oscillation detection: floor=%d", c.adaptive.floor)
+	if c.adaptive.floor != 20 {
+		t.Fatalf("CPU swaps prevented two cycle detections: floor=%d", c.adaptive.floor)
 	}
 }

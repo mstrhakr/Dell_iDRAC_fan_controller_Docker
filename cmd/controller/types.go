@@ -104,6 +104,8 @@ type trendState struct {
 // Controller is the main fan control orchestrator.
 type Controller struct {
 	cfg                 Config
+	cfgMu               sync.RWMutex // Synchronizes configuration changes with signal shutdown.
+	settings            controllerSettings
 	pid                 pidState
 	ema                 emaState
 	prevSmoothed        float64
@@ -154,7 +156,6 @@ type cycleSample struct {
 	baselineReady   bool
 	baselineFloor   int
 	adaptiveFloor   int
-	adaptiveUntil   int64
 	fanRPMMin       *int
 	fanRPMMax       *int
 }
@@ -195,7 +196,6 @@ type dashboardSample struct {
 	BaselineReady   bool    `json:"baseline_ready"`
 	BaselineFloor   int     `json:"baseline_floor"`
 	AdaptiveFloor   int     `json:"adaptive_floor"`
-	AdaptiveUntil   int64   `json:"adaptive_until"`
 	FanRPMMin       *int    `json:"fan_rpm_min,omitempty"`
 	FanRPMMax       *int    `json:"fan_rpm_max,omitempty"`
 }

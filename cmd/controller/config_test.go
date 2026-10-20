@@ -41,9 +41,9 @@ func TestConfiguredAutomaticMinimumAppliesToAllPolicies(t *testing.T) {
 	if c.pid.current != 20 {
 		t.Fatalf("PID ignored minimum: duty=%g", c.pid.current)
 	}
-	feedAdaptiveSwings(c, time.Unix(1000, 0), 6, controlReferenceInterval, 20, 70, 10)
-	if c.adaptive.floor != 25 {
-		t.Fatalf("adaptive floor did not build on configured minimum: %d", c.adaptive.floor)
+	feedAdaptiveCycles(c, time.Unix(1000, 0), 3, controlReferenceInterval, 10, 55)
+	if c.adaptive.floor != 35 {
+		t.Fatalf("three completed cycles did not raise configured minimum: %d", c.adaptive.floor)
 	}
 }
 
