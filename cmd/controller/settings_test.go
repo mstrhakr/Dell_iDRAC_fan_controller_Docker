@@ -13,9 +13,14 @@ import (
 )
 
 func TestDashboardSettingsSaveRevisionAndPasswordSecrecy(t *testing.T) {
+	setupRampConfigTest(t)
 	settingsPath := filepath.Join(t.TempDir(), "settings.json")
 	t.Setenv("CONTROLLER_SETTINGS_FILE", settingsPath)
-	c := newTestController()
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatal(err)
+	}
+	c := newController(cfg)
 	if err := c.initSettings(); err != nil {
 		t.Fatal(err)
 	}
