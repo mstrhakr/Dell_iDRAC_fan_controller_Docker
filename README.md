@@ -6,6 +6,7 @@
 If it has made your server(s) quieter, you can [thank me by sponsoring me](https://github.com/sponsors/tigerblue77). Thank you 🙏
 
 ## Table of contents
+
 <ol>
   <li><a href="#container-console-log-example">Container console log example</a></li>
   <li><a href="#requirements">Requirements</a></li>
@@ -27,6 +28,7 @@ If it has made your server(s) quieter, you can [thank me by sponsoring me](https
 
 <!-- REQUIREMENTS -->
 ## Requirements
+
 ### iDRAC version
 
 This container drives the fans with two IPMI raw commands Dell removed from its recent hardware. What decides whether yours takes them is the iDRAC firmware, not the model :
@@ -48,21 +50,22 @@ None of it has to be worked out in advance : the container asks the server, logs
 
 The account this container uses must be an **Administrator** on the iDRAC : fan control is not read-only, and a lesser account is refused it with the very completion code (`0xd4`) a firmware that removed the commands returns.
 
-### To access iDRAC over LAN (not needed in "local" mode) :
+### To access iDRAC over LAN (not needed in "local" mode)
 
 1. Log into your iDRAC web console
 
 ![001](https://user-images.githubusercontent.com/37409593/210168273-7d760e47-143e-4a6e-aca7-45b483024139.png)
 
-2. In the left side menu, expand "iDRAC settings", click "Network" then click "IPMI Settings" link at the top of the web page.
+1. In the left side menu, expand "iDRAC settings", click "Network" then click "IPMI Settings" link at the top of the web page.
 
 ![002](https://user-images.githubusercontent.com/37409593/210168249-994f29cc-ac9e-4667-84f7-07f6d9a87522.png)
 
-3. Check the "Enable IPMI over LAN" checkbox then click "Apply" button.
+1. Check the "Enable IPMI over LAN" checkbox then click "Apply" button.
 
 ![003](https://user-images.githubusercontent.com/37409593/210168248-a68982c4-9fe7-40e7-8b2c-b3f06fbfee62.png)
 
-4. Test access to IPMI over LAN running the following commands :
+1. Test access to IPMI over LAN running the following commands :
+
 ```bash
 apt -y install ipmitool
 ipmitool -I lanplus \
@@ -78,6 +81,7 @@ ipmitool -I lanplus \
 ## Supported architectures
 
 This Docker container is currently built and available for the following CPU architectures :
+
 - AMD64
 - ARM64
 
@@ -111,7 +115,7 @@ docker run -d \
   tigerblue77/dell_idrac_fan_controller:latest
 ```
 
-2. with LAN iDRAC:
+1. with LAN iDRAC:
 
 ```bash
 docker run -d \
@@ -153,7 +157,7 @@ services:
       - /dev/ipmi0:/dev/ipmi0:rw
 ```
 
-2. to use with LAN iDRAC:
+1. to use with LAN iDRAC:
 
 ```yml
 version: '3.8'
@@ -309,7 +313,7 @@ Fan control uses two separate commands: disable Dell automatic control, then set
 
 Dell's own documents disagree on which licence this needs — [KB 000257346](https://www.dell.com/support/kbdoc/en-us/000257346/poweredge-how-to-change-the-fan-speed-offset) says *"Enterprise or Datacenter"* for the web interface, the iDRAC 9 RACADM guide says *"iDRAC Express or iDRAC Enterprise"* for the same attributes, and the iDRAC 10 attribute registry marks them as needing none — so look rather than assume. Whether this container could ever drive any of it is [#360](https://github.com/tigerblue77/Dell_iDRAC_fan_controller_Docker/issues/360), which is waiting on hardware and is not a promise.
 
-### Your server frequently switches back to the default Dell fan mode:
+### Your server frequently switches back to the default Dell fan mode
 
 1. In static mode, Dell cooling resumes when a monitored temperature exceeds its normal threshold; increase a validated `FAN_SPEED` if static duty is insufficient.
 2. In automatic mode, normal threshold crossings increase requested duty rather than handing control back to Dell. Critical raw temperatures command 100% immediately. Check the dashboard and logged action to distinguish these paths.
@@ -320,6 +324,7 @@ Dell's own documents disagree on which licence this needs — [KB 000257346](htt
 The Go controller reads all currently readable IPMI CPU entities, then displays the hottest controlling CPU in summary logs and the dashboard. It does not display a persistent per-socket temperature table or retain an inventory of previously seen CPUs.
 
 If fewer sensors are listed than the number of CPUs installed, your iDRAC isn't reporting the missing sockets as readable IPMI processor entities. Check what it does report with :
+
 ```bash
 ipmitool -I lanplus \
   -H <iDRAC IP address> \
@@ -327,6 +332,7 @@ ipmitool -I lanplus \
   -P <iDRAC password> \
   sdr type temperature
 ```
+
 CPUs are the lines whose 4th column is an entity `3.<something>` and whose reading ends in `degrees C`. They need not be contiguous nor in order: a socket that is empty or unreadable is usually still listed, but as `Disabled` or `No Reading` instead of a temperature, and is therefore not monitored. Please [open an issue](https://github.com/tigerblue77/Dell_iDRAC_fan_controller_Docker/issues) with your server model and that output if a CPU that does report a temperature is missing from the table.
 
 New readable entities are included on the next check. **A previously readable socket that disappears while other sensors remain is currently omitted, not tracked as a fault.** Verify every installed CPU is represented in the IPMI output; the hottest-source chart is not evidence that every socket is still readable.
@@ -358,11 +364,14 @@ Don't forget to give the project a star! Thanks again!
 Please read [`CONTRIBUTING.md`](./CONTRIBUTING.md) before you do : it explains the sign-off in step 3, and the terms your contribution arrives under in a project that is [dual-licensed](#license).
 
 To test locally, use either :
+
 ```bash
 docker build -t tigerblue77/dell_idrac_fan_controller:dev .
 docker run -d ...
 ```
+
 or
+
 ```bash
 export IDRAC_HOST=<iDRAC IP address>
 export IDRAC_USERNAME=<iDRAC username>
@@ -407,7 +416,7 @@ Running the container is never restricted. On a homelab, on a company's own serv
 **Using it**
 
 | | Under `AGPL-3.0-only` |
-|---|---|
+| --- | --- |
 | Run it in a homelab | ✅ |
 | Run it at work, in production, at any scale | ✅ no permission needed |
 | Modify it for your own use, without distributing it | ✅ |
@@ -418,7 +427,7 @@ Running the container is never restricted. On a homelab, on a company's own serv
 **Putting it inside something you ship**
 
 | | What you need |
-|---|---|
+| --- | --- |
 | Ship it in your product, publishing your modified source | ✅ nothing — the AGPL covers it |
 | Ship it in your product, keeping your source closed | 💼 commercial licence |
 | Build a service on it and decline the §13 source obligation | 💼 commercial licence |
