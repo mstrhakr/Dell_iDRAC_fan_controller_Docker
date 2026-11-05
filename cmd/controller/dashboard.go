@@ -254,7 +254,11 @@ function renderChart(svgId, samples, sets, colors, labels, minV, maxV, guides, f
   svg.onmouseleave = () => { cursor.style.display = 'none'; tooltip.style.display = 'none'; };
   svg.onmousemove = (event) => {
     if (!samples.length) return;
-    const rect = svg.getBoundingClientRect(), x = (event.clientX - rect.left) * width / rect.width;
+    const transform = svg.getScreenCTM();
+    if (!transform) return;
+    const pointer = svg.createSVGPoint();
+    pointer.x = event.clientX; pointer.y = event.clientY;
+    const x = pointer.matrixTransform(transform.inverse()).x;
     const index = Math.max(0, Math.min(samples.length - 1, Math.round((x - plot.left) / plot.width * Math.max(1, samples.length - 1))));
     const cursorX = plot.left + index * plot.width / Math.max(1, samples.length - 1); cursor.setAttribute('x1', cursorX); cursor.setAttribute('x2', cursorX); cursor.setAttribute('y1', plot.top); cursor.setAttribute('y2', plot.top + plot.height); cursor.style.display = 'block';
     const sample = samples[index]; tooltip.innerHTML = '<b>' + new Date(sample.ts * 1000).toLocaleString() + '</b>' + sets.map((values, i) => labels[i] + ': ' + (Number.isFinite(values[index]) ? formatValue(values[index]) : '—')).join('<br>'); tooltip.style.left = Math.min(event.clientX + 14, window.innerWidth - 210) + 'px'; tooltip.style.top = Math.min(event.clientY + 14, window.innerHeight - 110) + 'px'; tooltip.style.display = 'block';
